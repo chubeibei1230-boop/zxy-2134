@@ -157,7 +157,7 @@ function endEarly(id, newEndTime) {
 
 function extendTemporarily(id, newEndTime) {
   const plan = state.plans.find(p => p.id === id)
-  if (plan) {
+  if (plan && timeToMinutes(newEndTime) > timeToMinutes(plan.startTime)) {
     plan.endTime = newEndTime
     recalculateAllConflicts()
   }

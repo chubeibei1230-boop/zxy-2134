@@ -36,6 +36,10 @@
           ⚠ 此计划跨越午休时段（{{ store.state.middayBreak.start }}-{{ store.state.middayBreak.end }}），冲突检测将排除午休时段
         </div>
 
+        <div class="time-error-notice" v-if="timeOrderError">
+          ✕ 结束时间必须晚于开始时间
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label>队伍</label>
@@ -93,7 +97,7 @@
 
 <script setup>
 import { reactive, computed, watch } from 'vue'
-import { store, spansMiddayBreak, checkConflictsForPreview } from '../store.js'
+import { store, spansMiddayBreak, checkConflictsForPreview, timeToMinutes } from '../store.js'
 
 const isEdit = computed(() => !!store.state.editingPlanId)
 const isOrganizer = computed(() => store.state.currentRole === 'organizer')
@@ -117,15 +121,20 @@ const spansBreak = computed(() => {
 })
 
 const previewConflicts = computed(() => {
-  if (!form.venue || !form.date || !form.startTime || !form.endTime) return []
+  if (!form.venue || !form.date || !form.startTime || !form.endTime || timeOrderError.value) return []
   return checkConflictsForPreview(
     { venue: form.venue, date: form.date, startTime: form.startTime, endTime: form.endTime },
     store.state.editingPlanId
   )
 })
 
+const timeOrderError = computed(() => {
+  if (!form.startTime || !form.endTime) return false
+  return timeToMinutes(form.endTime) <= timeToMinutes(form.startTime)
+})
+
 const canSubmit = computed(() => {
-  return form.date && form.venue && form.startTime && form.endTime && form.team && form.intensity
+  return form.date && form.venue && form.startTime && form.endTime && form.team && form.intensity && !timeOrderError.value
 })
 
 watch(() => store.state.editingPlanId, (newId) => {
@@ -304,6 +313,16 @@ function cancel() {
   padding: 10px 14px;
   font-size: 13px;
   color: #d97706;
+  margin-bottom: 16px;
+}
+
+.time-error-notice {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #dc2626;
   margin-bottom: 16px;
 }
 

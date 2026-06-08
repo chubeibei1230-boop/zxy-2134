@@ -38,18 +38,21 @@
               class="td-cell"
               :class="{ 'is-break': slot.isBreak }"
             >
-              <div
-                v-if="getSlotPlan(venue, slot)"
-                class="slot-plan"
-                :class="[
-                  getSlotPlan(venue, slot).intensity,
-                  { conflict: getSlotPlan(venue, slot).hasConflict }
-                ]"
-                :title="slotTooltip(venue, slot)"
-                @click="onSlotClick(venue, slot)"
-              >
-                {{ getSlotPlan(venue, slot).team }}
-              </div>
+              <template v-if="getSlotPlans(venue, slot).length > 0">
+                <div
+                  v-for="plan in getSlotPlans(venue, slot)"
+                  :key="plan.id"
+                  class="slot-plan"
+                  :class="[
+                    plan.intensity,
+                    { conflict: plan.hasConflict }
+                  ]"
+                  :title="`${plan.team} | ${plan.startTime}-${plan.endTime} | ${plan.responsiblePerson} | ${plan.hasConflict ? '⚠ 冲突' : '正常'}`"
+                  @click="store.startEdit(plan)"
+                >
+                  {{ plan.team }}
+                </div>
+              </template>
             </td>
           </tr>
         </tbody>
@@ -68,7 +71,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { store, timeToMinutes, minutesToTime } from '../store.js'
+import { store, timeToMinutes, minutesToTime, getEffectiveSegments } from '../store.js'
 
 const timeStart = ref(6 * 60)
 const timeEnd = ref(21 * 60)
@@ -93,30 +96,32 @@ const timeSlots = computed(() => {
 const datePlans = computed(() => store.plansForDate.value)
 
 function planOccupiesSlot(plan, slot) {
-  const ps = timeToMinutes(plan.startTime)
-  const pe = timeToMinutes(plan.endTime)
-  return ps < slot.end && pe > slot.start
+  const segments = getEffectiveSegments(plan.startTime, plan.endTime, store.state.middayBreak)
+  return segments.some(seg => {
+    const s = timeToMinutes(seg.start)
+    const e = timeToMinutes(seg.end)
+    return s < slot.end && e > slot.start
+  })
 }
 
-function getSlotPlan(venue, slot) {
-  for (const plan of datePlans.value) {
-    if (plan.venue === venue && planOccupiesSlot(plan, slot)) {
-      return plan
-    }
-  }
-  return null
+function getSlotPlans(venue, slot) {
+  return datePlans.value.filter(plan =>
+    plan.venue === venue && planOccupiesSlot(plan, slot)
+  )
 }
 
 function slotTooltip(venue, slot) {
-  const plan = getSlotPlan(venue, slot)
-  if (!plan) return ''
-  return `${plan.team} | ${plan.startTime}-${plan.endTime} | ${plan.responsiblePerson} | ${plan.hasConflict ? '⚠ 冲突' : '正常'}`
+  const plans = getSlotPlans(venue, slot)
+  if (plans.length === 0) return ''
+  return plans.map(p =>
+    `${p.team} | ${p.startTime}-${p.endTime} | ${p.responsiblePerson} | ${p.hasConflict ? '⚠ 冲突' : '正常'}`
+  ).join('\n')
 }
 
 function onSlotClick(venue, slot) {
-  const plan = getSlotPlan(venue, slot)
-  if (plan) {
-    store.startEdit(plan)
+  const plans = getSlotPlans(venue, slot)
+  if (plans.length > 0) {
+    store.startEdit(plans[0])
   }
 }
 </script>
@@ -232,12 +237,11 @@ function onSlotClick(venue, slot) {
 }
 
 .td-cell {
-  padding: 2px;
+  padding: 1px 2px;
   border-bottom: 1px solid var(--border);
   border-right: 1px solid rgba(255, 255, 255, 0.03);
   min-width: 55px;
-  height: 36px;
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .td-cell.is-break {
@@ -245,9 +249,9 @@ function onSlotClick(venue, slot) {
 }
 
 .slot-plan {
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-size: 11px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-size: 10px;
   font-weight: 500;
   text-align: center;
   cursor: pointer;
@@ -255,6 +259,8 @@ function onSlotClick(venue, slot) {
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: filter 0.15s;
+  margin-bottom: 1px;
+  line-height: 1.4;
 }
 
 .slot-plan:hover {

@@ -81,9 +81,12 @@
           <label>新结束时间</label>
           <input type="time" v-model="adjustEndTime" step="900" />
         </div>
+        <div class="adjust-error" v-if="adjustTimeError">
+          ✕ 新结束时间必须晚于开始时间 {{ adjustingPlan.startTime }}
+        </div>
         <div class="adjust-actions">
           <button class="btn btn-secondary" @click="adjustingPlan = null">取消</button>
-          <button class="btn btn-primary" @click="confirmAdjust">确认</button>
+          <button class="btn btn-primary" @click="confirmAdjust" :disabled="!!adjustTimeError">确认</button>
         </div>
       </div>
     </div>
@@ -118,6 +121,11 @@ const adjustingPlan = ref(null)
 const adjustMode = ref('early')
 const adjustEndTime = ref('')
 
+const adjustTimeError = computed(() => {
+  if (!adjustingPlan.value || !adjustEndTime.value) return false
+  return timeToMinutes(adjustEndTime.value) <= timeToMinutes(adjustingPlan.value.startTime)
+})
+
 function handleEndEarly(plan) {
   adjustingPlan.value = plan
   adjustMode.value = 'early'
@@ -135,7 +143,7 @@ function handleExtend(plan) {
 }
 
 function confirmAdjust() {
-  if (!adjustingPlan.value || !adjustEndTime.value) return
+  if (!adjustingPlan.value || !adjustEndTime.value || adjustTimeError.value) return
   if (adjustMode.value === 'early') {
     store.endEarly(adjustingPlan.value.id, adjustEndTime.value)
   } else {
@@ -378,6 +386,12 @@ function handleDelete(plan) {
 
 .adjust-time input:focus {
   border-color: var(--accent);
+}
+
+.adjust-error {
+  font-size: 12px;
+  color: #dc2626;
+  margin-bottom: 12px;
 }
 
 .adjust-actions {
