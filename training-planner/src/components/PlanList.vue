@@ -272,6 +272,12 @@ function handleExtend(plan) {
 
 function confirmAdjust() {
   if (!adjustingPlan.value || !adjustEndTime.value || adjustTimeError.value) return
+  const activeCR = getActiveChangeRequest(adjustingPlan.value)
+  if (activeCR) {
+    alert('该计划已有进行中的变更申请，不能直接修改。请通过变更申请流程处理。')
+    adjustingPlan.value = null
+    return
+  }
   if (adjustMode.value === 'early') {
     store.endEarly(adjustingPlan.value.id, adjustEndTime.value)
   } else {

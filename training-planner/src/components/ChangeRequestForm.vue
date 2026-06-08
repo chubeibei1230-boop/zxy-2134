@@ -2,7 +2,7 @@
   <div class="cr-form-overlay" v-if="store.state.showChangeRequestForm" @click.self="cancel">
     <div class="cr-form">
       <div class="form-header">
-        <h3>发起变更申请</h3>
+        <h3>{{ editingCR ? '修改变更申请' : '发起变更申请' }}</h3>
         <button class="btn-icon" @click="cancel">✕</button>
       </div>
 
@@ -148,7 +148,7 @@
       <div class="form-footer">
         <button class="btn btn-secondary" @click="cancel">取消</button>
         <button class="btn btn-primary" @click="submit" :disabled="!canSubmit">
-          提交变更申请
+          {{ editingCR ? '保存修改' : '提交变更申请' }}
         </button>
       </div>
     </div>
@@ -164,6 +164,7 @@ import {
 } from '../store.js'
 
 const originalPlan = computed(() => store.changeRequestTargetPlan.value)
+const editingCR = computed(() => store.editingChangeRequest.value)
 
 const form = reactive({
   changeType: CHANGE_TYPE.CHANGE_TIME,
@@ -211,12 +212,22 @@ const canSubmit = computed(() => {
 
 watch(() => store.state.showChangeRequestForm, (shown) => {
   if (shown && originalPlan.value) {
-    form.changeType = CHANGE_TYPE.CHANGE_TIME
-    form.targetDate = originalPlan.value.date
-    form.targetVenue = originalPlan.value.venue
-    form.targetStartTime = originalPlan.value.startTime
-    form.targetEndTime = originalPlan.value.endTime
-    form.reason = ''
+    const existing = editingCR.value
+    if (existing) {
+      form.changeType = existing.changeType
+      form.targetDate = existing.targetDate || originalPlan.value.date
+      form.targetVenue = existing.targetVenue || originalPlan.value.venue
+      form.targetStartTime = existing.targetStartTime || originalPlan.value.startTime
+      form.targetEndTime = existing.targetEndTime || originalPlan.value.endTime
+      form.reason = existing.reason || ''
+    } else {
+      form.changeType = CHANGE_TYPE.CHANGE_TIME
+      form.targetDate = originalPlan.value.date
+      form.targetVenue = originalPlan.value.venue
+      form.targetStartTime = originalPlan.value.startTime
+      form.targetEndTime = originalPlan.value.endTime
+      form.reason = ''
+    }
   }
 })
 
@@ -230,6 +241,22 @@ function cancel() {
 
 function submit() {
   if (!canSubmit.value) return
+
+  if (editingCR.value) {
+    const result = store.updateChangeRequest(editingCR.value.id, {
+      changeType: form.changeType,
+      reason: form.reason,
+      targetDate: form.changeType === CHANGE_TYPE.CANCEL ? '' : form.targetDate,
+      targetVenue: form.changeType === CHANGE_TYPE.CANCEL ? '' : form.targetVenue,
+      targetStartTime: form.changeType === CHANGE_TYPE.CANCEL ? '' : form.targetStartTime,
+      targetEndTime: form.changeType === CHANGE_TYPE.CANCEL ? '' : form.targetEndTime
+    })
+    if (result) {
+      store.closeChangeRequestForm()
+    }
+    return
+  }
+
   const planId = store.state.changeRequestTargetPlanId
   if (!planId) return
 

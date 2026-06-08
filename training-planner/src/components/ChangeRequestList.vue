@@ -112,6 +112,7 @@
             <button class="action-btn confirm" @click="handleConfirm(cr)" title="确认生效">✓ 确认生效</button>
           </template>
           <template v-if="isExecutor && cr.status === CHANGE_REQUEST_STATUS.REJECTED">
+            <button class="action-btn edit" @click="handleEdit(cr)" title="编辑修改">✎ 编辑</button>
             <button class="action-btn resubmit" @click="handleResubmit(cr)" title="重新提交">🔄 重新提交</button>
           </template>
           <button class="action-btn detail" @click="viewDetail(cr)" title="查看详情">ℹ 详情</button>
@@ -299,7 +300,12 @@ function confirmReview() {
   if (reviewDialog.mode === 'approve') {
     const result = store.approveChangeRequest(reviewDialog.cr.id, reviewDialog.comment)
     if (!result) {
-      reviewDialog.error = '审核失败，只有监督人可以审核变更申请'
+      const cr = store.state.changeRequests.find(c => c.id === reviewDialog.cr.id)
+      if (cr && cr.affectedByOccupation) {
+        reviewDialog.error = '无法通过：目标时段存在场地占用冲突，请驳回并要求执行人修改目标安排'
+      } else {
+        reviewDialog.error = '审核失败，只有监督人可以审核变更申请'
+      }
       return
     }
   } else {
@@ -325,14 +331,19 @@ function handleConfirm(cr) {
   if (confirm(msg)) {
     const result = store.confirmChangeRequest(cr.id)
     if (!result) {
-      alert('确认失败，只有组织者可以确认变更申请')
+      const updatedCr = store.state.changeRequests.find(c => c.id === cr.id)
+      if (updatedCr && updatedCr.affectedByOccupation) {
+        alert('无法确认生效：目标时段存在场地占用冲突，请驳回该变更申请并要求执行人修改目标安排')
+      } else {
+        alert('确认失败，只有组织者可以确认变更申请')
+      }
     }
   }
 }
 
 function handleResubmit(cr) {
   if (cr.affectedByOccupation && cr.changeType !== CHANGE_TYPE.CANCEL) {
-    alert('目标时段仍存在场地占用冲突，无法重新提交，请先调整目标安排')
+    alert('目标时段仍存在场地占用冲突，无法重新提交。请先编辑修改目标安排后再重新提交。')
     return
   }
   if (confirm('确定重新提交该变更申请？')) {
@@ -341,6 +352,10 @@ function handleResubmit(cr) {
       alert('重新提交失败，只有执行人可以重新提交已驳回的变更申请')
     }
   }
+}
+
+function handleEdit(cr) {
+  store.startEditChangeRequest(cr.id)
 }
 
 const detailDialog = reactive({
@@ -717,6 +732,15 @@ function viewDetail(cr) {
 
 .action-btn.resubmit:hover {
   background: rgba(245, 158, 11, 0.15);
+}
+
+.action-btn.edit {
+  border-color: #9333ea;
+  color: #9333ea;
+}
+
+.action-btn.edit:hover {
+  background: rgba(168, 85, 247, 0.15);
 }
 
 .action-btn.detail {
