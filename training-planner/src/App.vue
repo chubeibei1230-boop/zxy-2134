@@ -9,10 +9,13 @@
             :key="role.key"
             class="role-btn"
             :class="{ active: store.state.currentRole === role.key }"
-            @click="store.state.currentRole = role.key"
+            @click="switchRole(role.key)"
           >
             {{ role.icon }} {{ role.label }}
           </button>
+        </div>
+        <div class="role-hint" v-if="roleHint">
+          {{ roleHint }}
         </div>
       </div>
       <div class="header-center">
@@ -64,7 +67,7 @@
               <button
                 class="item-remove"
                 v-if="isOrganizer"
-                @click="store.removeVenue(v)"
+                @click="handleRemoveVenue(v)"
               >✕</button>
             </div>
           </div>
@@ -210,9 +213,23 @@ const roles = [
   { key: 'supervisor', label: '监督人', icon: '👁' }
 ]
 
+const roleDescriptions = {
+  organizer: '组织者：可查看已通过/已发布计划并统筹发布，不可查看草稿和待审批',
+  executor: '执行人：可创建/编辑/提交训练计划，处理被驳回的修改',
+  supervisor: '监督人：可审批或驳回待审批计划，不可查看草稿'
+}
+
+const roleHint = ref('')
+
 const isOrganizer = computed(() => store.state.currentRole === 'organizer')
 const isExecutor = computed(() => store.state.currentRole === 'executor')
 const isSupervisor = computed(() => store.state.currentRole === 'supervisor')
+
+function switchRole(roleKey) {
+  store.state.currentRole = roleKey
+  roleHint.value = roleDescriptions[roleKey]
+  setTimeout(() => { roleHint.value = '' }, 4000)
+}
 
 const activeTab = ref('list')
 
@@ -256,6 +273,38 @@ function addTeam() {
     store.addTeam(newTeamName.value.trim())
     newTeamName.value = ''
     showAddTeam.value = false
+  }
+}
+
+function handleRemoveVenue(name) {
+  const plansInVenue = store.state.plans.filter(p => p.venue === name)
+  const protectedPlans = plansInVenue.filter(p =>
+    p.status === PLAN_STATUS.APPROVED || p.status === PLAN_STATUS.PUBLISHED
+  )
+  if (protectedPlans.length > 0) {
+    alert(
+      `无法删除场地「${name}」\n\n` +
+      `该场地下有 ${protectedPlans.length} 条已通过或已发布的正式排期计划，` +
+      `删除场地会导致正式排期计划丢失。\n\n` +
+      `请先将相关计划调整至其他场地，或取消发布后再尝试删除。`
+    )
+    return
+  }
+  const deletablePlans = plansInVenue.filter(p =>
+    p.status === PLAN_STATUS.DRAFT || p.status === PLAN_STATUS.REJECTED || p.status === PLAN_STATUS.PENDING_APPROVAL
+  )
+  let message = `确定删除场地「${name}」？`
+  if (deletablePlans.length > 0) {
+    const statusGroups = {}
+    deletablePlans.forEach(p => {
+      const label = { draft: '草稿', pending_approval: '待审批', rejected: '已驳回' }[p.status] || p.status
+      statusGroups[label] = (statusGroups[label] || 0) + 1
+    })
+    const details = Object.entries(statusGroups).map(([s, c]) => `${s} ${c} 条`).join('、')
+    message = `确定删除场地「${name}」？\n\n⚠ 该场地下共有 ${deletablePlans.length} 条训练计划将被同步删除：\n${details}\n\n此操作不可撤销。`
+  }
+  if (confirm(message)) {
+    store.removeVenue(name)
   }
 }
 
@@ -372,6 +421,23 @@ body {
 .role-btn:hover:not(.active) {
   color: var(--text-primary);
   background: var(--bg-hover);
+}
+
+.role-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 2px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  animation: hint-fade 4s ease-out forwards;
+}
+
+@keyframes hint-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .header-center {

@@ -35,21 +35,31 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { store, STATUS_LABELS, STATUS_COLORS } from '../store.js'
+import { store, STATUS_LABELS, STATUS_COLORS, PLAN_STATUS } from '../store.js'
 
 const expanded = ref(true)
 
 const conflicts = computed(() => store.allConflicts.value)
 
+function isPlanVisibleToCurrentRole(plan) {
+  const role = store.state.currentRole
+  if (role === 'executor') return true
+  if (role === 'supervisor') return plan.status !== PLAN_STATUS.DRAFT
+  if (role === 'organizer') return plan.status === PLAN_STATUS.APPROVED || plan.status === PLAN_STATUS.PUBLISHED
+  return false
+}
+
 function getPlanLabel(id) {
   const plan = store.state.plans.find(p => p.id === id)
   if (!plan) return '(已删除)'
+  if (!isPlanVisibleToCurrentRole(plan)) return '(其他计划)'
   return `${plan.team} ${plan.startTime}-${plan.endTime}`
 }
 
 function goToPlan(id) {
   const plan = store.state.plans.find(p => p.id === id)
-  if (plan && (plan.status === 'draft' || plan.status === 'rejected')) {
+  if (!plan || !isPlanVisibleToCurrentRole(plan)) return
+  if (plan.status === 'draft' || plan.status === 'rejected') {
     if (store.state.currentRole === 'executor') {
       store.startEdit(plan)
     }

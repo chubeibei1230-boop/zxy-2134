@@ -27,6 +27,7 @@ export const STATUS_COLORS = {
 }
 
 let nextId = 1
+const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
 function generateId() {
   return `plan_${nextId++}_${Date.now()}`
@@ -53,16 +54,17 @@ function makePlan(overrides) {
     approvedAt: '',
     publishedAt: '',
     createdBy: 'executor',
+    actionSessionId: '',
     ...overrides
   }
 }
 
 const _seedPlans = [
-  makePlan({ venue: '主训练场', startTime: '08:00', endTime: '10:00', team: '猎鹰突击队', headcount: 20, responsiblePerson: '张指挥', intensity: 'high', notes: '综合战术演练', status: PLAN_STATUS.PUBLISHED, createdBy: 'executor', submittedAt: '2026-06-07T09:00:00', approvedAt: '2026-06-07T10:30:00', publishedAt: '2026-06-07T14:00:00' }),
-  makePlan({ venue: '主训练场', startTime: '10:30', endTime: '12:00', team: '雷霆特战队', headcount: 15, responsiblePerson: '李教官', intensity: 'medium', notes: '射击训练', status: PLAN_STATUS.APPROVED, createdBy: 'executor', submittedAt: '2026-06-07T11:00:00', approvedAt: '2026-06-07T15:00:00' }),
-  makePlan({ venue: '主训练场', startTime: '09:30', endTime: '11:30', team: '利刃先锋队', headcount: 12, responsiblePerson: '刘副官', intensity: 'medium', notes: '障碍突破（冲突项）', status: PLAN_STATUS.PENDING_APPROVAL, createdBy: 'executor', submittedAt: '2026-06-08T08:00:00' }),
+  makePlan({ venue: '主训练场', startTime: '08:00', endTime: '10:00', team: '猎鹰突击队', headcount: 20, responsiblePerson: '张指挥', intensity: 'high', notes: '综合战术演练', status: PLAN_STATUS.PUBLISHED, createdBy: 'executor', submittedAt: '2026-06-07T09:00:00', approvedAt: '2026-06-07T10:30:00', publishedAt: '2026-06-07T14:00:00', actionSessionId: 'seed' }),
+  makePlan({ venue: '主训练场', startTime: '10:30', endTime: '12:00', team: '雷霆特战队', headcount: 15, responsiblePerson: '李教官', intensity: 'medium', notes: '射击训练', status: PLAN_STATUS.APPROVED, createdBy: 'executor', submittedAt: '2026-06-07T11:00:00', approvedAt: '2026-06-07T15:00:00', actionSessionId: 'seed' }),
+  makePlan({ venue: '主训练场', startTime: '09:30', endTime: '11:30', team: '利刃先锋队', headcount: 12, responsiblePerson: '刘副官', intensity: 'medium', notes: '障碍突破（冲突项）', status: PLAN_STATUS.PENDING_APPROVAL, createdBy: 'executor', submittedAt: '2026-06-08T08:00:00', actionSessionId: 'seed' }),
   makePlan({ venue: '副训练场', startTime: '09:00', endTime: '11:00', team: '钢铁卫士队', headcount: 25, responsiblePerson: '王队长', intensity: 'low', notes: '体能拉练', status: PLAN_STATUS.DRAFT, createdBy: 'executor' }),
-  makePlan({ venue: '体能训练馆', startTime: '14:00', endTime: '16:00', team: '利刃先锋队', headcount: 18, responsiblePerson: '赵教练', intensity: 'high', notes: '力量训练', status: PLAN_STATUS.REJECTED, rejectReason: '该时段体能训练馆已有设备维护安排，请调整至15:00之后或更换场地', createdBy: 'executor', submittedAt: '2026-06-07T14:00:00' }),
+  makePlan({ venue: '体能训练馆', startTime: '14:00', endTime: '16:00', team: '利刃先锋队', headcount: 18, responsiblePerson: '赵教练', intensity: 'high', notes: '力量训练', status: PLAN_STATUS.REJECTED, rejectReason: '该时段体能训练馆已有设备维护安排，请调整至15:00之后或更换场地', createdBy: 'executor', submittedAt: '2026-06-07T14:00:00', actionSessionId: 'seed' }),
   makePlan({ venue: '战术模拟室', startTime: '11:00', endTime: '14:00', team: '猎鹰突击队', headcount: 10, responsiblePerson: '张指挥', intensity: 'medium', notes: '跨午休模拟演练', status: PLAN_STATUS.DRAFT, createdBy: 'executor' })
 ]
 
@@ -179,7 +181,50 @@ function canTransition(planId, fromStatus, toStatus) {
     [`${PLAN_STATUS.APPROVED}->${PLAN_STATUS.PUBLISHED}`]: ['organizer']
   }
   const key = `${fromStatus}->${toStatus}`
-  return allowed[key] ? allowed[key].includes(role) : false
+  if (!allowed[key] || !allowed[key].includes(role)) return false
+  if (toStatus === PLAN_STATUS.APPROVED || toStatus === PLAN_STATUS.REJECTED) {
+    if (plan.actionSessionId === sessionId) return false
+  }
+  if (toStatus === PLAN_STATUS.PUBLISHED) {
+    if (plan.actionSessionId === sessionId) return false
+  }
+  return true
+}
+
+function getTransitionError(planId, fromStatus, toStatus) {
+  const plan = state.plans.find(p => p.id === planId)
+  if (!plan) return '计划不存在'
+  if (plan.status !== fromStatus) return '计划状态已变更'
+  const role = state.currentRole
+  const allowed = {
+    [`${PLAN_STATUS.DRAFT}->${PLAN_STATUS.PENDING_APPROVAL}`]: ['executor'],
+    [`${PLAN_STATUS.PENDING_APPROVAL}->${PLAN_STATUS.APPROVED}`]: ['supervisor'],
+    [`${PLAN_STATUS.PENDING_APPROVAL}->${PLAN_STATUS.REJECTED}`]: ['supervisor'],
+    [`${PLAN_STATUS.REJECTED}->${PLAN_STATUS.PENDING_APPROVAL}`]: ['executor'],
+    [`${PLAN_STATUS.APPROVED}->${PLAN_STATUS.PUBLISHED}`]: ['organizer']
+  }
+  const key = `${fromStatus}->${toStatus}`
+  if (!allowed[key] || !allowed[key].includes(role)) {
+    const roleLabels = { executor: '执行人', supervisor: '监督人', organizer: '组织者' }
+    const actionLabels = {
+      [`${PLAN_STATUS.DRAFT}->${PLAN_STATUS.PENDING_APPROVAL}`]: '提交审批',
+      [`${PLAN_STATUS.PENDING_APPROVAL}->${PLAN_STATUS.APPROVED}`]: '审批通过',
+      [`${PLAN_STATUS.PENDING_APPROVAL}->${PLAN_STATUS.REJECTED}`]: '驳回计划',
+      [`${PLAN_STATUS.REJECTED}->${PLAN_STATUS.PENDING_APPROVAL}`]: '重新提交',
+      [`${PLAN_STATUS.APPROVED}->${PLAN_STATUS.PUBLISHED}`]: '发布计划'
+    }
+    const allowedRoles = (allowed[key] || []).map(r => roleLabels[r]).join('、')
+    return `"${actionLabels[key] || '此操作'}"仅限${allowedRoles}执行，当前角色为${roleLabels[role]}`
+  }
+  if ((toStatus === PLAN_STATUS.APPROVED || toStatus === PLAN_STATUS.REJECTED || toStatus === PLAN_STATUS.PUBLISHED) && plan.actionSessionId === sessionId) {
+    const actionLabels = {
+      [PLAN_STATUS.APPROVED]: '审批',
+      [PLAN_STATUS.REJECTED]: '审批',
+      [PLAN_STATUS.PUBLISHED]: '发布'
+    }
+    return `同一会话中不能${actionLabels[toStatus]}自己提交的计划，请交由其他人员处理`
+  }
+  return ''
 }
 
 function addPlan(planData) {
@@ -227,6 +272,7 @@ function submitPlan(id) {
   plan.submittedAt = new Date().toISOString()
   plan.rejectReason = ''
   plan.approvalComment = ''
+  plan.actionSessionId = sessionId
   recalculateAllConflicts()
   return true
 }
@@ -239,6 +285,7 @@ function approvePlan(id, comment) {
   plan.approvedAt = new Date().toISOString()
   plan.approvalComment = comment || ''
   plan.rejectReason = ''
+  plan.actionSessionId = sessionId
   recalculateAllConflicts()
   return true
 }
@@ -261,6 +308,7 @@ function resubmitPlan(id) {
   plan.status = PLAN_STATUS.PENDING_APPROVAL
   plan.submittedAt = new Date().toISOString()
   plan.rejectReason = ''
+  plan.actionSessionId = sessionId
   recalculateAllConflicts()
   return true
 }
@@ -342,7 +390,15 @@ const plansForDate = computed(() => {
 })
 
 const allConflicts = computed(() => {
-  return getVisiblePlans().filter(plan => plan.hasConflict)
+  const visible = getVisiblePlans()
+  const visibleIds = new Set(visible.map(p => p.id))
+  return visible.filter(plan => {
+    const filteredConflicts = plan.conflictWith.filter(cid => visibleIds.has(cid))
+    return filteredConflicts.length > 0
+  }).map(plan => ({
+    ...plan,
+    conflictWith: plan.conflictWith.filter(cid => visibleIds.has(cid))
+  }))
 })
 
 const pendingApprovalPlans = computed(() => {
@@ -361,9 +417,15 @@ function addVenue(name) {
 }
 
 function removeVenue(name) {
+  const plansInVenue = state.plans.filter(p => p.venue === name)
+  const protectedPlans = plansInVenue.filter(p =>
+    p.status === PLAN_STATUS.APPROVED || p.status === PLAN_STATUS.PUBLISHED
+  )
+  if (protectedPlans.length > 0) return { success: false, protectedCount: protectedPlans.length, totalPlans: plansInVenue.length }
   state.venues = state.venues.filter(v => v !== name)
   state.plans = state.plans.filter(p => p.venue !== name)
   recalculateAllConflicts()
+  return { success: true, removedCount: plansInVenue.length }
 }
 
 function addTeam(name) {
@@ -414,7 +476,8 @@ function importData(jsonString) {
         submittedAt: p.submittedAt || '',
         approvedAt: p.approvedAt || '',
         publishedAt: p.publishedAt || '',
-        createdBy: p.createdBy || 'executor'
+        createdBy: p.createdBy || 'executor',
+        actionSessionId: p.actionSessionId || ''
       }))
       const maxNum = state.plans.reduce((max, p) => {
         const num = parseInt(p.id.split('_')[1]) || 0
@@ -449,6 +512,7 @@ export const store = {
   publishPlan,
   checkConflictsForPreview,
   recalculateAllConflicts,
+  getTransitionError,
   filteredPlans,
   plansForDate,
   allConflicts,

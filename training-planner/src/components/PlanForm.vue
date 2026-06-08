@@ -242,10 +242,18 @@ function submitAndApprove() {
   }
   if (isEdit.value) {
     store.updatePlan(store.state.editingPlanId, planData)
-    store.resubmitPlan(store.state.editingPlanId)
+    const result = store.resubmitPlan(store.state.editingPlanId)
+    if (!result) {
+      const error = store.getTransitionError(store.state.editingPlanId, PLAN_STATUS.REJECTED, PLAN_STATUS.PENDING_APPROVAL)
+      alert(error || '重新提交失败')
+    }
   } else {
     const plan = store.addPlan({ ...planData, status: PLAN_STATUS.DRAFT })
-    store.submitPlan(plan.id)
+    const result = store.submitPlan(plan.id)
+    if (!result) {
+      const error = store.getTransitionError(plan.id, PLAN_STATUS.DRAFT, PLAN_STATUS.PENDING_APPROVAL)
+      alert(error || '提交失败')
+    }
   }
   store.closeForm()
 }

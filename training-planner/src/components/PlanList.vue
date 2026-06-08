@@ -263,7 +263,8 @@ function handleSubmit(plan) {
   if (confirm(`确定提交「${plan.team} - ${plan.venue}」的计划进行审批？`)) {
     const result = store.submitPlan(plan.id)
     if (!result) {
-      alert('提交失败，只有执行人可以提交草稿状态的计划')
+      const error = store.getTransitionError(plan.id, PLAN_STATUS.DRAFT, PLAN_STATUS.PENDING_APPROVAL)
+      alert(error || '提交失败，只有执行人可以提交草稿状态的计划')
     }
   }
 }
@@ -272,7 +273,8 @@ function handleResubmit(plan) {
   if (confirm(`确定重新提交「${plan.team} - ${plan.venue}」的计划？`)) {
     const result = store.resubmitPlan(plan.id)
     if (!result) {
-      alert('重新提交失败，只有执行人可以重新提交已驳回的计划')
+      const error = store.getTransitionError(plan.id, PLAN_STATUS.REJECTED, PLAN_STATUS.PENDING_APPROVAL)
+      alert(error || '重新提交失败，只有执行人可以重新提交已驳回的计划')
     }
   }
 }
@@ -281,7 +283,8 @@ function handlePublish(plan) {
   if (confirm(`确定发布「${plan.team} - ${plan.venue}」的训练计划？发布后将进入正式排期。`)) {
     const result = store.publishPlan(plan.id)
     if (!result) {
-      alert('发布失败，只有组织者可以发布已通过的计划')
+      const error = store.getTransitionError(plan.id, PLAN_STATUS.APPROVED, PLAN_STATUS.PUBLISHED)
+      alert(error || '发布失败，只有组织者可以发布已通过的计划')
     }
   }
 }
@@ -315,13 +318,15 @@ function confirmApproval() {
   if (approvalDialog.mode === 'approve') {
     const result = store.approvePlan(approvalDialog.plan.id, approvalDialog.comment)
     if (!result) {
-      approvalDialog.error = '审批失败，只有监督人可以审批待审批的计划'
+      const error = store.getTransitionError(approvalDialog.plan.id, PLAN_STATUS.PENDING_APPROVAL, PLAN_STATUS.APPROVED)
+      approvalDialog.error = error || '审批失败，只有监督人可以审批待审批的计划'
       return
     }
   } else {
     const result = store.rejectPlan(approvalDialog.plan.id, approvalDialog.comment)
     if (!result) {
-      approvalDialog.error = '驳回失败，只有监督人可以驳回待审批的计划'
+      const error = store.getTransitionError(approvalDialog.plan.id, PLAN_STATUS.PENDING_APPROVAL, PLAN_STATUS.REJECTED)
+      approvalDialog.error = error || '驳回失败，只有监督人可以驳回待审批的计划'
       return
     }
   }
