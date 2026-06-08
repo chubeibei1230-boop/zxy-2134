@@ -89,6 +89,7 @@ export const CHANGE_TYPE_COLORS = {
 let nextId = 1
 let nextOccupationId = 1
 let nextChangeRequestId = 1
+let nextBatchId = 1
 const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
 function generateId() {
@@ -101,6 +102,10 @@ function generateOccupationId() {
 
 function generateChangeRequestId() {
   return `cr_${nextChangeRequestId++}_${Date.now()}`
+}
+
+function generateBatchId() {
+  return `batch_${nextBatchId++}_${Date.now()}`
 }
 
 function makePlan(overrides) {
@@ -127,6 +132,7 @@ function makePlan(overrides) {
     publishedAt: '',
     createdBy: 'executor',
     actionSessionId: '',
+    batchId: '',
     ...overrides
   }
 }
@@ -219,7 +225,14 @@ const state = reactive({
   changeRequestFilters: {
     status: '',
     changeType: ''
-  }
+  },
+  batchFilters: {
+    batchId: ''
+  },
+  showBatchScheduleForm: false,
+  showBatchPreview: false,
+  batchPreviewItems: [],
+  batchScheduleConfig: null
 })
 
 export function timeToMinutes(time) {
@@ -642,6 +655,7 @@ const filteredPlans = computed(() => {
     if (state.filters.intensity && plan.intensity !== state.filters.intensity) return false
     if (state.filters.conflictOnly && !plan.hasConflict) return false
     if (state.filters.status && plan.status !== state.filters.status) return false
+    if (state.batchFilters.batchId && plan.batchId !== state.batchFilters.batchId) return false
     return true
   })
 })
@@ -891,9 +905,293 @@ const changeRequestTargetPlan = computed(() => {
   return state.plans.find(p => p.id === state.changeRequestTargetPlanId) || null
 })
 
+function generateBatchDates(config) {
+  const dates = []
+  const startDate = new Date(config.startDate)
+  const endDate = new Date(config.endDate)
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return dates
+  if (startDate > endDate) return dates
+
+  if (config.repeatMode === 'daily') {
+    const current = new Date(startDate)
+    while (current <= endDate) {
+      dates.push(current.toISOString().split('T')[0])
+      current.setDate(current.getDate() + (config.repeatInterval || 1))
+    }
+  } else if (config.repeatMode === 'weekly') {
+    const weekdays = config.weekdays || []
+    const current = new Date(startDate)
+    while (current <= endDate) {
+      const dayOfWeek = current.getDay()
+      const adjustedDay = dayOfWeek === 0 ? 7 : dayOfWeek
+      if (weekdays.includes(adjustedDay)) {
+        dates.push(current.toISOString().split('T')[0])
+      }
+      current.setDate(current.getDate() + 1)
+    }
+  } else if (config.repeatMode === 'consecutive') {
+    const totalDays = config.totalDays || 1
+    for (let i = 0; i < totalDays; i++) {
+      const d = new Date(startDate)
+      d.setDate(d.getDate() + i)
+      dates.push(d.toISOString().split('T')[0])
+    }
+  }
+  return dates
+}
+
+function generateBatchPreview(config) {
+  const dates = generateBatchDates(config)
+  const items = dates.map(date => {
+    const planData = {
+      date,
+      venue: config.venue,
+      startTime: config.startTime,
+      endTime: config.endTime,
+      team: config.team,
+      headcount: config.headcount || 0,
+      responsiblePerson: config.responsiblePerson,
+      intensity: config.intensity,
+      notes: config.notes || ''
+    }
+    const planConflicts = checkConflictsForPreview(
+      { venue: planData.venue, date: planData.date, startTime: planData.startTime, endTime: planData.endTime }
+    )
+    const occConflicts = checkOccupationConflictsForPreview(
+      { venue: planData.venue, date: planData.date, startTime: planData.startTime, endTime: planData.endTime }
+    )
+    const crossesBreak = spansMiddayBreak(planData.startTime, planData.endTime, state.middayBreak)
+    return {
+      ...planData,
+      date,
+      planConflicts,
+      occupationConflicts: occConflicts,
+      spansMiddayBreak: crossesBreak,
+      hasConflict: planConflicts.length > 0,
+      hasOccupationConflict: occConflicts.length > 0,
+      action: 'submit'
+    }
+  })
+  return items
+}
+
+function startBatchSchedule() {
+  state.showBatchScheduleForm = true
+}
+
+function closeBatchScheduleForm() {
+  state.showBatchScheduleForm = false
+  state.batchScheduleConfig = null
+}
+
+function submitBatchSchedule(config) {
+  const items = generateBatchPreview(config)
+  state.batchPreviewItems = items
+  state.batchScheduleConfig = config
+  state.showBatchScheduleForm = false
+  state.showBatchPreview = true
+}
+
+function closeBatchPreview() {
+  state.showBatchPreview = false
+  state.batchPreviewItems = []
+  state.batchScheduleConfig = null
+}
+
+function updateBatchPreviewItemAction(index, action) {
+  if (index >= 0 && index < state.batchPreviewItems.length) {
+    state.batchPreviewItems[index].action = action
+  }
+}
+
+function confirmBatchSchedule() {
+  const batchId = generateBatchId()
+  const config = state.batchScheduleConfig
+  const items = state.batchPreviewItems
+  const createdPlans = []
+
+  items.forEach(item => {
+    if (item.action === 'skip') return
+
+    let status = PLAN_STATUS.DRAFT
+    if (item.action === 'submit') {
+      if (item.hasOccupationConflict) {
+        status = PLAN_STATUS.DRAFT
+      } else if (item.hasConflict) {
+        status = PLAN_STATUS.DRAFT
+      } else {
+        status = PLAN_STATUS.DRAFT
+      }
+    }
+
+    const plan = makePlan({
+      date: item.date,
+      venue: item.venue,
+      startTime: item.startTime,
+      endTime: item.endTime,
+      team: item.team,
+      headcount: item.headcount || 0,
+      responsiblePerson: item.responsiblePerson,
+      intensity: item.intensity,
+      notes: item.notes || '',
+      status,
+      batchId,
+      createdBy: state.currentRole === 'executor' ? 'executor' : state.currentRole
+    })
+    state.plans.push(plan)
+    createdPlans.push(plan)
+
+    if (item.action === 'submit' && !item.hasOccupationConflict && !item.hasConflict) {
+      plan.actionSessionId = sessionId
+      plan.status = PLAN_STATUS.PENDING_APPROVAL
+      plan.submittedAt = new Date().toISOString()
+    }
+  })
+
+  recalculateAllConflicts()
+  state.showBatchPreview = false
+  state.batchPreviewItems = []
+  state.batchScheduleConfig = null
+  return { batchId, plans: createdPlans }
+}
+
+function getPlansByBatchId(batchId) {
+  if (!batchId) return []
+  return state.plans.filter(p => p.batchId === batchId)
+}
+
+function getBatchList() {
+  const batchMap = {}
+  state.plans.forEach(plan => {
+    if (!plan.batchId) return
+    if (!batchMap[plan.batchId]) {
+      batchMap[plan.batchId] = {
+        batchId: plan.batchId,
+        team: plan.team,
+        venue: plan.venue,
+        startTime: plan.startTime,
+        endTime: plan.endTime,
+        plans: [],
+        createdAt: ''
+      }
+    }
+    batchMap[plan.batchId].plans.push(plan)
+    if (!batchMap[plan.batchId].createdAt || plan.id < batchMap[plan.batchId].createdAt) {
+      batchMap[plan.batchId].createdAt = plan.id
+    }
+  })
+  return Object.values(batchMap).map(batch => ({
+    ...batch,
+    totalCount: batch.plans.length,
+    statusSummary: {
+      draft: batch.plans.filter(p => p.status === PLAN_STATUS.DRAFT).length,
+      pending_approval: batch.plans.filter(p => p.status === PLAN_STATUS.PENDING_APPROVAL).length,
+      approved: batch.plans.filter(p => p.status === PLAN_STATUS.APPROVED).length,
+      rejected: batch.plans.filter(p => p.status === PLAN_STATUS.REJECTED).length,
+      published: batch.plans.filter(p => p.status === PLAN_STATUS.PUBLISHED).length
+    }
+  }))
+}
+
+const batchList = computed(() => getBatchList())
+
+function batchApprove(batchId, comment) {
+  if (state.currentRole !== 'supervisor') return { success: false, error: '只有监督人可以批量审批' }
+  const plans = getPlansByBatchId(batchId)
+  let approved = 0
+  let skipped = 0
+  plans.forEach(plan => {
+    if (plan.status !== PLAN_STATUS.PENDING_APPROVAL) { skipped++; return }
+    if (plan.actionSessionId === sessionId) { skipped++; return }
+    if (plan.hasConflict || plan.affectedByOccupation) { skipped++; return }
+    plan.status = PLAN_STATUS.APPROVED
+    plan.approvedAt = new Date().toISOString()
+    plan.approvalComment = comment || ''
+    plan.rejectReason = ''
+    plan.actionSessionId = sessionId
+    approved++
+  })
+  recalculateAllConflicts()
+  return { success: true, approved, skipped }
+}
+
+function batchReject(batchId, reason) {
+  if (state.currentRole !== 'supervisor') return { success: false, error: '只有监督人可以批量驳回' }
+  if (!reason || !reason.trim()) return { success: false, error: '批量驳回时必须填写驳回原因' }
+  const plans = getPlansByBatchId(batchId)
+  let rejected = 0
+  let skipped = 0
+  plans.forEach(plan => {
+    if (plan.status !== PLAN_STATUS.PENDING_APPROVAL) { skipped++; return }
+    if (plan.actionSessionId === sessionId) { skipped++; return }
+    plan.status = PLAN_STATUS.REJECTED
+    plan.rejectReason = reason
+    plan.approvalComment = ''
+    rejected++
+  })
+  recalculateAllConflicts()
+  return { success: true, rejected, skipped }
+}
+
+function batchPublish(batchId) {
+  if (state.currentRole !== 'organizer') return { success: false, error: '只有组织者可以批量发布' }
+  const plans = getPlansByBatchId(batchId)
+  let published = 0
+  let skipped = 0
+  plans.forEach(plan => {
+    if (plan.status !== PLAN_STATUS.APPROVED) { skipped++; return }
+    if (plan.actionSessionId === sessionId) { skipped++; return }
+    plan.status = PLAN_STATUS.PUBLISHED
+    plan.publishedAt = new Date().toISOString()
+    published++
+  })
+  recalculateAllConflicts()
+  return { success: true, published, skipped }
+}
+
+function getBatchStatusImpact(batchId) {
+  const plans = getPlansByBatchId(batchId)
+  if (plans.length === 0) return null
+  const statusGroups = {}
+  plans.forEach(p => {
+    if (!statusGroups[p.status]) statusGroups[p.status] = []
+    statusGroups[p.status].push(p)
+  })
+  const rejectedPlans = statusGroups[PLAN_STATUS.REJECTED] || []
+  const cancelledCRs = state.changeRequests.filter(cr =>
+    cr.changeType === CHANGE_TYPE.CANCEL &&
+    rejectedPlans.some(rp => rp.id === cr.originalPlanId)
+  )
+  const changedPlans = plans.filter(p => {
+    const activeCR = getActiveChangeRequestForPlan(p.id)
+    return activeCR !== null
+  })
+  return {
+    total: plans.length,
+    statusGroups,
+    rejectedCount: rejectedPlans.length,
+    changedCount: changedPlans.length,
+    cancelledByCR: cancelledCRs.length,
+    rejectedPlans: rejectedPlans.map(p => ({
+      id: p.id,
+      date: p.date,
+      rejectReason: p.rejectReason
+    })),
+    changedPlans: changedPlans.map(p => {
+      const cr = getActiveChangeRequestForPlan(p.id)
+      return {
+        id: p.id,
+        date: p.date,
+        changeType: cr ? cr.changeType : '',
+        changeReason: cr ? cr.reason : ''
+      }
+    })
+  }
+}
+
 function exportData() {
   const data = {
-    version: 4,
+    version: 5,
     exportDate: new Date().toISOString(),
     venues: [...state.venues],
     teams: [...state.teams],
@@ -934,7 +1232,8 @@ function importData(jsonString) {
         createdBy: p.createdBy || 'executor',
         actionSessionId: p.actionSessionId || '',
         occupationConflicts: p.occupationConflicts || [],
-        affectedByOccupation: p.affectedByOccupation || false
+        affectedByOccupation: p.affectedByOccupation || false,
+        batchId: p.batchId || ''
       }))
       const maxNum = state.plans.reduce((max, p) => {
         const num = parseInt(p.id.split('_')[1]) || 0
@@ -1036,5 +1335,20 @@ export const store = {
   filteredChangeRequests,
   pendingReviewChangeRequests,
   approvedChangeRequests,
-  changeRequestTargetPlan
+  changeRequestTargetPlan,
+  startBatchSchedule,
+  closeBatchScheduleForm,
+  submitBatchSchedule,
+  closeBatchPreview,
+  updateBatchPreviewItemAction,
+  confirmBatchSchedule,
+  generateBatchPreview,
+  generateBatchDates,
+  getPlansByBatchId,
+  getBatchList,
+  batchList,
+  batchApprove,
+  batchReject,
+  batchPublish,
+  getBatchStatusImpact
 }

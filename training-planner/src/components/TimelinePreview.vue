@@ -65,7 +65,8 @@
                       'status-approved': plan.status === PLAN_STATUS.APPROVED,
                       'status-rejected': plan.status === PLAN_STATUS.REJECTED,
                       'status-published': plan.status === PLAN_STATUS.PUBLISHED,
-                      'has-change-request': !!getActiveChangeRequest(plan.id)
+                      'has-change-request': !!getActiveChangeRequest(plan.id),
+                      'has-batch': plan.batchId
                     }
                   ]"
                   :title="slotPlanTooltip(plan)"
@@ -74,6 +75,7 @@
                   <span class="slot-plan-name">{{ plan.team }}</span>
                   <span class="slot-plan-status-dot" :style="{ background: STATUS_COLORS[plan.status].color }"></span>
                   <span class="slot-cr-dot" v-if="getActiveChangeRequest(plan.id)" title="有变更申请">📝</span>
+                  <span class="slot-batch-dot" v-if="plan.batchId" :title="'批次 ' + plan.batchId.split('_').slice(0,2).join('_')">📦</span>
                 </div>
               </template>
             </td>
@@ -91,6 +93,8 @@
       <span class="legend-item"><span class="legend-color break"></span>午休</span>
       <span class="legend-separator">|</span>
       <span class="legend-item"><span class="legend-color change"></span>变更申请中</span>
+      <span class="legend-separator">|</span>
+      <span class="legend-item"><span class="legend-color batch"></span>批次计划</span>
       <span class="legend-separator">|</span>
       <span class="legend-item"><span class="legend-dot" style="background:#6b7280"></span>草稿</span>
       <span class="legend-item"><span class="legend-dot" style="background:#d97706"></span>待审批</span>
@@ -173,6 +177,9 @@ function slotPlanTooltip(plan) {
   const activeCR = getActiveChangeRequest(plan.id)
   if (activeCR) {
     tip += ` | 📝 变更申请：${CHANGE_TYPE_LABELS[activeCR.changeType]}(${CHANGE_REQUEST_STATUS_LABELS[activeCR.status]})`
+  }
+  if (plan.batchId) {
+    tip += ` | 📦 批次 ${plan.batchId.split('_').slice(0,2).join('_')}`
   }
   return tip
 }
@@ -421,6 +428,16 @@ function handlePlanClick(plan) {
   line-height: 1;
 }
 
+.slot-plan.has-batch {
+  outline: 2px dotted #818cf8;
+  outline-offset: -1px;
+}
+
+.slot-batch-dot {
+  font-size: 8px;
+  line-height: 1;
+}
+
 @keyframes pulse-conflict {
   0%, 100% { outline-color: #ef4444; }
   50% { outline-color: rgba(239, 68, 68, 0.4); }
@@ -463,6 +480,8 @@ function handlePlanClick(plan) {
 .legend-color.break { background: rgba(245, 158, 11, 0.15); }
 
 .legend-color.change { background: rgba(168, 85, 247, 0.1); outline: 2px dashed #9333ea; }
+
+.legend-color.batch { background: rgba(99, 102, 241, 0.1); outline: 2px dotted #818cf8; }
 
 .legend-dot {
   width: 8px;

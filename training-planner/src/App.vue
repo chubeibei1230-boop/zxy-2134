@@ -55,6 +55,13 @@
         >
           + 新建计划
         </button>
+        <button
+          class="header-btn batch-btn"
+          @click="store.startBatchSchedule()"
+          v-if="isExecutor"
+        >
+          📦 周期排期
+        </button>
       </div>
     </header>
 
@@ -152,6 +159,18 @@
             </div>
           </div>
           <div class="todo-empty" v-else>暂无待处理事项</div>
+        </div>
+
+        <div class="sidebar-section" v-if="batchTodoItems.length > 0">
+          <div class="section-header">
+            <h3>📦 批次待办</h3>
+          </div>
+          <div class="todo-list">
+            <div class="todo-item" v-for="item in batchTodoItems" :key="item.batchId" @click="goToBatch(item.batchId)">
+              <span class="todo-badge batch">批次</span>
+              <span class="todo-text">{{ item.team }} · {{ item.venue }} · {{ item.totalCount }}条</span>
+            </div>
+          </div>
         </div>
 
         <div class="sidebar-section" v-if="isSupervisor">
@@ -260,6 +279,8 @@
     <PlanForm />
     <OccupationForm :visible="showOccupationForm" @close="showOccupationForm = false" @confirmed="showOccupationForm = false" />
     <ChangeRequestForm />
+    <BatchScheduleForm />
+    <BatchPreviewDialog />
   </div>
 </template>
 
@@ -274,6 +295,8 @@ import OccupationPanel from './components/OccupationPanel.vue'
 import OccupationForm from './components/OccupationForm.vue'
 import ChangeRequestList from './components/ChangeRequestList.vue'
 import ChangeRequestForm from './components/ChangeRequestForm.vue'
+import BatchScheduleForm from './components/BatchScheduleForm.vue'
+import BatchPreviewDialog from './components/BatchPreviewDialog.vue'
 
 const roles = [
   { key: 'organizer', label: '组织者', icon: '🏗' },
@@ -345,6 +368,26 @@ const organizerCRItems = computed(() =>
     cr.status === CHANGE_REQUEST_STATUS.APPROVED
   )
 )
+
+const batchTodoItems = computed(() => {
+  return store.batchList.value.filter(batch => {
+    if (isExecutor.value) {
+      return batch.statusSummary.draft > 0 || batch.statusSummary.rejected > 0
+    }
+    if (isSupervisor.value) {
+      return batch.statusSummary.pending_approval > 0
+    }
+    if (isOrganizer.value) {
+      return batch.statusSummary.approved > 0
+    }
+    return false
+  })
+})
+
+function goToBatch(batchId) {
+  store.state.batchFilters.batchId = batchId
+  activeTab.value = 'list'
+}
 
 function crBadgeClass(cr) {
   if (cr.status === CHANGE_REQUEST_STATUS.PENDING_REVIEW) return 'pending'
@@ -999,5 +1042,22 @@ body {
 input[type="time"]::-webkit-calendar-picker-indicator,
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(0.7);
+}
+
+.header-btn.batch-btn {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #818cf8;
+}
+
+.header-btn.batch-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.todo-badge.batch {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
 }
 </style>

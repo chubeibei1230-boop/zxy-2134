@@ -55,6 +55,7 @@
               class="cr-plan-status"
               :style="{ background: STATUS_COLORS[getOriginalPlan(cr).status].bg, color: STATUS_COLORS[getOriginalPlan(cr).status].color }"
             >{{ STATUS_LABELS[getOriginalPlan(cr).status] }}</span>
+            <span class="cr-batch" v-if="getOriginalPlan(cr)?.batchId">📦 批次 {{ getOriginalPlan(cr).batchId.split('_').slice(0,2).join('_') }}</span>
           </div>
         </div>
 
@@ -116,6 +117,14 @@
             <button class="action-btn resubmit" @click="handleResubmit(cr)" title="重新提交">🔄 重新提交</button>
           </template>
           <button class="action-btn detail" @click="viewDetail(cr)" title="查看详情">ℹ 详情</button>
+        </div>
+
+        <div class="cr-batch-impact" v-if="getOriginalPlan(cr)?.batchId">
+          <span class="batch-impact-label">📦 批次影响：</span>
+          <span class="batch-impact-text">
+            此变更将影响批次 {{ getOriginalPlan(cr).batchId.split('_').slice(0,2).join('_') }} 中的本条计划，
+            批次内其他计划不受影响
+          </span>
         </div>
       </div>
     </div>
@@ -985,5 +994,32 @@ function viewDetail(cr) {
 
 .timeline-dot.confirmed {
   background: #6366f1;
+}
+
+.cr-batch {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
+.cr-batch-impact {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.batch-impact-label {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.batch-impact-text {
+  color: var(--text-secondary);
 }
 </style>

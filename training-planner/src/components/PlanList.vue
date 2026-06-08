@@ -23,6 +23,12 @@
         <input type="checkbox" v-model="store.state.filters.conflictOnly" />
         <span>仅冲突</span>
       </label>
+      <select v-model="store.state.batchFilters.batchId" class="filter-select" v-if="batchOptions.length > 0">
+        <option value="">全部批次</option>
+        <option v-for="b in batchOptions" :key="b.batchId" :value="b.batchId">
+          批次 {{ b.batchShortId }} ({{ b.team }} {{ b.totalCount }}条)
+        </option>
+      </select>
       <button class="btn-clear" v-if="hasFilters" @click="clearFilters">清除筛选</button>
     </div>
 
@@ -36,6 +42,7 @@
       <span class="col-intensity">强度</span>
       <span class="col-plan-status">状态</span>
       <span class="col-conflict">冲突</span>
+      <span class="col-batch">批次</span>
       <span class="col-actions">操作</span>
     </div>
 
@@ -75,6 +82,14 @@
           <span class="conflict-badge" :class="plan.hasConflict ? 'conflict' : 'ok'">
             {{ plan.hasConflict ? (plan.affectedByOccupation ? '占用' : '冲突') : '正常' }}
           </span>
+        </span>
+        <span class="col-batch">
+          <span
+            v-if="plan.batchId"
+            class="batch-badge"
+            @click="filterByBatch(plan.batchId)"
+            :title="'点击筛选此批次'"
+          >📦 {{ getBatchShortId(plan.batchId) }}</span>
         </span>
         <span class="col-actions">
           <template v-if="isExecutor">
@@ -153,6 +168,25 @@
             :style="{ background: CHANGE_REQUEST_STATUS_COLORS[getActiveChangeRequest(plan).status].bg, color: CHANGE_REQUEST_STATUS_COLORS[getActiveChangeRequest(plan).status].color }"
           >{{ CHANGE_REQUEST_STATUS_LABELS[getActiveChangeRequest(plan).status] }}</span>
         </div>
+        <div class="row-batch-impact" v-if="plan.batchId && getBatchImpact(plan.batchId)">
+          <span class="batch-impact-label">📦 批次状态差异：</span>
+          <span
+            v-for="(plans, status) in getBatchImpact(plan.batchId).statusGroups"
+            :key="status"
+            class="batch-impact-status"
+          >
+            <span class="impact-status-badge" :style="{ background: STATUS_COLORS[status]?.bg, color: STATUS_COLORS[status]?.color }">
+              {{ STATUS_LABELS[status] }} {{ plans.length }}
+            </span>
+          </span>
+          <span class="batch-impact-rejected" v-if="getBatchImpact(plan.batchId).rejectedCount > 0">
+            （{{ getBatchImpact(plan.batchId).rejectedCount }} 条已驳回）
+          </span>
+          <span class="batch-impact-changed" v-if="getBatchImpact(plan.batchId).changedCount > 0">
+            （{{ getBatchImpact(plan.batchId).changedCount }} 条变更中）
+          </span>
+          <button class="impact-view-btn" @click="openBatchImpactDetail(plan.batchId)">详情</button>
+        </div>
       </div>
     </div>
 
@@ -210,6 +244,121 @@
         </div>
       </div>
     </div>
+    <div class="batch-ops-bar" v-if="activeBatchOps">
+      <div class="batch-ops-info">
+        <span class="batch-ops-badge">📦 批次 {{ activeBatchOps.shortId }}</span>
+        <span class="batch-ops-team">{{ activeBatchOps.team }}</span>
+        <span class="batch-ops-count">{{ activeBatchOps.totalCount }} 条计划</span>
+        <span class="batch-ops-summary">
+          <span v-if="activeBatchOps.statusSummary.pending_approval > 0" class="summary-pending">
+            {{ activeBatchOps.statusSummary.pending_approval }} 待审批
+          </span>
+          <span v-if="activeBatchOps.statusSummary.approved > 0" class="summary-approved">
+            {{ activeBatchOps.statusSummary.approved }} 已通过
+          </span>
+          <span v-if="activeBatchOps.statusSummary.rejected > 0" class="summary-rejected">
+            {{ activeBatchOps.statusSummary.rejected }} 已驳回
+          </span>
+        </span>
+      </div>
+      <div class="batch-ops-actions">
+        <template v-if="isSupervisor && activeBatchOps.statusSummary.pending_approval > 0">
+          <button class="btn btn-batch-approve" @click="openBatchApprovalDialog('approve')">
+            ✓ 批量通过 ({{ activeBatchOps.statusSummary.pending_approval }})
+          </button>
+          <button class="btn btn-batch-reject" @click="openBatchApprovalDialog('reject')">
+            ✕ 批量驳回
+          </button>
+        </template>
+        <template v-if="isOrganizer && activeBatchOps.statusSummary.approved > 0">
+          <button class="btn btn-batch-publish" @click="handleBatchPublish">
+            📢 批量发布 ({{ activeBatchOps.statusSummary.approved }})
+          </button>
+        </template>
+        <button class="btn btn-secondary btn-sm" @click="clearBatchFilter">退出批次</button>
+      </div>
+    </div>
+
+    <div class="batch-approval-dialog" v-if="batchApprovalDialog.visible">
+      <div class="approval-overlay" @click="batchApprovalDialog.visible = false"></div>
+      <div class="approval-panel">
+        <h4>{{ batchApprovalDialog.mode === 'approve' ? '批量审批通过' : '批量驳回' }}</h4>
+        <p class="approval-info">
+          批次 {{ activeBatchOps?.shortId }} · {{ activeBatchOps?.team }} ·
+          {{ activeBatchOps?.statusSummary.pending_approval }} 条待审批
+        </p>
+        <div class="approval-warn" v-if="batchApprovalDialog.mode === 'approve'">
+          仅通过无冲突的待审批项，有冲突或占用冲突的将自动跳过
+        </div>
+        <div class="approval-field">
+          <label>{{ batchApprovalDialog.mode === 'approve' ? '审批意见（选填）' : '驳回原因（必填）' }}</label>
+          <textarea
+            v-model="batchApprovalDialog.comment"
+            :placeholder="batchApprovalDialog.mode === 'approve' ? '填写审批意见...' : '请填写驳回原因...'"
+            rows="3"
+          ></textarea>
+        </div>
+        <div class="approval-error" v-if="batchApprovalDialog.error">
+          {{ batchApprovalDialog.error }}
+        </div>
+        <div class="approval-actions">
+          <button class="btn btn-secondary" @click="batchApprovalDialog.visible = false">取消</button>
+          <button
+            class="btn"
+            :class="batchApprovalDialog.mode === 'approve' ? 'btn-approve' : 'btn-reject'"
+            @click="confirmBatchApproval"
+            :disabled="batchApprovalDialog.mode === 'reject' && !batchApprovalDialog.comment.trim()"
+          >
+            {{ batchApprovalDialog.mode === 'approve' ? '确认批量通过' : '确认批量驳回' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="batch-impact-dialog" v-if="batchImpactDialog.visible">
+      <div class="impact-overlay" @click="batchImpactDialog.visible = false"></div>
+      <div class="impact-panel">
+        <div class="impact-header">
+          <h4>批次状态详情</h4>
+          <button class="btn-icon" @click="batchImpactDialog.visible = false">✕</button>
+        </div>
+        <div class="impact-body" v-if="batchImpactDialog.impact">
+          <div class="impact-summary-row">
+            <span>总计划数：</span><strong>{{ batchImpactDialog.impact.total }}</strong>
+          </div>
+          <div class="impact-status-grid">
+            <div
+              v-for="(plans, status) in batchImpactDialog.impact.statusGroups"
+              :key="status"
+              class="impact-status-card"
+            >
+              <span class="impact-card-status" :style="{ background: STATUS_COLORS[status]?.bg, color: STATUS_COLORS[status]?.color }">
+                {{ STATUS_LABELS[status] }}
+              </span>
+              <span class="impact-card-count">{{ plans.length }}</span>
+            </div>
+          </div>
+          <div class="impact-rejected-list" v-if="batchImpactDialog.impact.rejectedPlans.length > 0">
+            <div class="impact-section-title">已驳回计划</div>
+            <div class="impact-rejected-item" v-for="p in batchImpactDialog.impact.rejectedPlans" :key="p.id">
+              <span class="rejected-date">{{ p.date }}</span>
+              <span class="rejected-reason">{{ p.rejectReason }}</span>
+            </div>
+          </div>
+          <div class="impact-changed-list" v-if="batchImpactDialog.impact.changedPlans.length > 0">
+            <div class="impact-section-title">变更中计划</div>
+            <div class="impact-changed-item" v-for="p in batchImpactDialog.impact.changedPlans" :key="p.id">
+              <span class="changed-date">{{ p.date }}</span>
+              <span
+                class="changed-type"
+                :style="{ background: CHANGE_TYPE_COLORS[p.changeType]?.bg, color: CHANGE_TYPE_COLORS[p.changeType]?.color }"
+              >{{ CHANGE_TYPE_LABELS[p.changeType] }}</span>
+              <span class="changed-reason" v-if="p.changeReason">{{ p.changeReason }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -223,7 +372,7 @@ const isOrganizer = computed(() => store.state.currentRole === 'organizer')
 
 const hasFilters = computed(() => {
   const f = store.state.filters
-  return f.venue || f.team || f.intensity || f.conflictOnly || f.status
+  return f.venue || f.team || f.intensity || f.conflictOnly || f.status || store.state.batchFilters.batchId
 })
 
 function clearFilters() {
@@ -232,6 +381,7 @@ function clearFilters() {
   store.state.filters.intensity = ''
   store.state.filters.conflictOnly = false
   store.state.filters.status = ''
+  store.state.batchFilters.batchId = ''
 }
 
 function intensityLabel(intensity) {
@@ -382,6 +532,104 @@ function confirmApproval() {
     }
   }
   approvalDialog.visible = false
+}
+
+const batchOptions = computed(() => {
+  return store.batchList.value.map(b => ({
+    ...b,
+    batchShortId: b.batchId.split('_').slice(0, 2).join('_')
+  }))
+})
+
+function getBatchShortId(batchId) {
+  if (!batchId) return ''
+  return batchId.split('_').slice(0, 2).join('_')
+}
+
+function filterByBatch(batchId) {
+  store.state.batchFilters.batchId = batchId
+}
+
+function clearBatchFilter() {
+  store.state.batchFilters.batchId = ''
+}
+
+const activeBatchOps = computed(() => {
+  const batchId = store.state.batchFilters.batchId
+  if (!batchId) return null
+  const batch = store.batchList.value.find(b => b.batchId === batchId)
+  if (!batch) return null
+  return {
+    ...batch,
+    shortId: getBatchShortId(batchId)
+  }
+})
+
+function getBatchImpact(batchId) {
+  return store.getBatchStatusImpact(batchId)
+}
+
+const batchApprovalDialog = reactive({
+  visible: false,
+  mode: 'approve',
+  comment: '',
+  error: ''
+})
+
+function openBatchApprovalDialog(mode) {
+  batchApprovalDialog.visible = true
+  batchApprovalDialog.mode = mode
+  batchApprovalDialog.comment = ''
+  batchApprovalDialog.error = ''
+}
+
+function confirmBatchApproval() {
+  if (!activeBatchOps.value) return
+  const batchId = activeBatchOps.value.batchId
+  if (batchApprovalDialog.mode === 'reject' && !batchApprovalDialog.comment.trim()) {
+    batchApprovalDialog.error = '批量驳回时必须填写驳回原因'
+    return
+  }
+  if (batchApprovalDialog.mode === 'approve') {
+    const result = store.batchApprove(batchId, batchApprovalDialog.comment)
+    if (!result.success) {
+      batchApprovalDialog.error = result.error
+      return
+    }
+    alert(`批量审批完成：通过 ${result.approved} 条，跳过 ${result.skipped} 条（含冲突项或同一会话提交项）`)
+  } else {
+    const result = store.batchReject(batchId, batchApprovalDialog.comment)
+    if (!result.success) {
+      batchApprovalDialog.error = result.error
+      return
+    }
+    alert(`批量驳回完成：驳回 ${result.rejected} 条，跳过 ${result.skipped} 条（非待审批状态）`)
+  }
+  batchApprovalDialog.visible = false
+}
+
+function handleBatchPublish() {
+  if (!activeBatchOps.value) return
+  const batchId = activeBatchOps.value.batchId
+  if (confirm(`确定批量发布批次「${activeBatchOps.value.shortId}」的所有已通过计划？`)) {
+    const result = store.batchPublish(batchId)
+    if (!result.success) {
+      alert(result.error)
+      return
+    }
+    alert(`批量发布完成：发布 ${result.published} 条，跳过 ${result.skipped} 条（非已通过状态）`)
+  }
+}
+
+const batchImpactDialog = reactive({
+  visible: false,
+  impact: null
+})
+
+function openBatchImpactDetail(batchId) {
+  const impact = store.getBatchStatusImpact(batchId)
+  batchImpactDialog.visible = true
+  batchImpactDialog.impact = impact
 }
 </script>
 
@@ -817,4 +1065,324 @@ function confirmApproval() {
 .btn-approve:hover:not(:disabled) { background: #15803d; }
 .btn-reject { background: #dc2626; color: white; }
 .btn-reject:hover:not(:disabled) { background: #b91c1c; }
+
+.col-batch { width: 90px; }
+
+.batch-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.batch-badge:hover {
+  background: rgba(99, 102, 241, 0.25);
+  color: var(--accent);
+}
+
+.row-batch-impact {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.batch-impact-label {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.impact-status-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.batch-impact-rejected {
+  color: #dc2626;
+  font-size: 11px;
+}
+
+.batch-impact-changed {
+  color: #9333ea;
+  font-size: 11px;
+}
+
+.impact-view-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  background: var(--bg-input);
+  color: var(--accent);
+  margin-left: auto;
+}
+
+.impact-view-btn:hover {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.batch-ops-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: rgba(99, 102, 241, 0.08);
+  border-top: 1px solid rgba(99, 102, 241, 0.2);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.batch-ops-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.batch-ops-badge {
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.batch-ops-team {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.batch-ops-count {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.batch-ops-summary {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.summary-pending {
+  color: #d97706;
+}
+
+.summary-approved {
+  color: #16a34a;
+}
+
+.summary-rejected {
+  color: #dc2626;
+}
+
+.batch-ops-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+.btn-batch-approve {
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #16a34a;
+  background: rgba(34, 197, 94, 0.1);
+  color: #16a34a;
+  transition: all 0.15s;
+}
+
+.btn-batch-approve:hover {
+  background: #16a34a;
+  color: white;
+}
+
+.btn-batch-reject {
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #dc2626;
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  transition: all 0.15s;
+}
+
+.btn-batch-reject:hover {
+  background: #dc2626;
+  color: white;
+}
+
+.btn-batch-publish {
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  transition: all 0.15s;
+}
+
+.btn-batch-publish:hover {
+  background: #6366f1;
+  color: white;
+}
+
+.batch-approval-dialog .approval-warn {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #d97706;
+  margin-bottom: 12px;
+}
+
+.impact-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 150;
+}
+
+.impact-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 24px;
+  width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+  z-index: 151;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+}
+
+.impact-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.impact-header h4 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.impact-summary-row {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.impact-summary-row strong {
+  color: var(--text-primary);
+}
+
+.impact-status-grid {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.impact-status-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-hover);
+  border-radius: 8px;
+}
+
+.impact-card-status {
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.impact-card-count {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.impact-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.impact-rejected-item,
+.impact-changed-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  background: var(--bg-hover);
+}
+
+.rejected-date,
+.changed-date {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 90px;
+}
+
+.rejected-reason {
+  color: #dc2626;
+  flex: 1;
+}
+
+.changed-type {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.changed-reason {
+  color: var(--text-secondary);
+  flex: 1;
+}
 </style>

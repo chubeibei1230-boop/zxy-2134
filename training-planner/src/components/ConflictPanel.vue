@@ -12,6 +12,7 @@
           <span class="conflict-date">{{ c.date }}</span>
           <span class="conflict-time">{{ c.startTime }}-{{ c.endTime }}</span>
           <span class="conflict-team">{{ c.team }}</span>
+          <span class="conflict-batch" v-if="c.batchId">📦 {{ c.batchId.split('_').slice(0,2).join('_') }}</span>
           <span
             class="conflict-status-badge"
             :style="{ background: STATUS_COLORS[c.status].bg, color: STATUS_COLORS[c.status].color }"
@@ -175,6 +176,15 @@ function goToPlan(id) {
 .conflict-time {
   color: #dc2626;
   font-variant-numeric: tabular-nums;
+}
+
+.conflict-batch {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
 }
 
 .conflict-team {
