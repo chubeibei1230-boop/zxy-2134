@@ -2,19 +2,68 @@ import { reactive, computed } from 'vue'
 
 const today = new Date().toISOString().split('T')[0]
 
+export const PLAN_STATUS = {
+  DRAFT: 'draft',
+  PENDING_APPROVAL: 'pending_approval',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  PUBLISHED: 'published'
+}
+
+export const STATUS_LABELS = {
+  [PLAN_STATUS.DRAFT]: '草稿',
+  [PLAN_STATUS.PENDING_APPROVAL]: '待审批',
+  [PLAN_STATUS.APPROVED]: '已通过',
+  [PLAN_STATUS.REJECTED]: '已驳回',
+  [PLAN_STATUS.PUBLISHED]: '已发布'
+}
+
+export const STATUS_COLORS = {
+  [PLAN_STATUS.DRAFT]: { bg: 'rgba(107,114,128,0.15)', color: '#6b7280' },
+  [PLAN_STATUS.PENDING_APPROVAL]: { bg: 'rgba(245,158,11,0.15)', color: '#d97706' },
+  [PLAN_STATUS.APPROVED]: { bg: 'rgba(34,197,94,0.15)', color: '#16a34a' },
+  [PLAN_STATUS.REJECTED]: { bg: 'rgba(239,68,68,0.15)', color: '#dc2626' },
+  [PLAN_STATUS.PUBLISHED]: { bg: 'rgba(99,102,241,0.15)', color: '#6366f1' }
+}
+
 let nextId = 1
 
 function generateId() {
   return `plan_${nextId++}_${Date.now()}`
 }
 
+function makePlan(overrides) {
+  return {
+    id: generateId(),
+    date: today,
+    venue: '',
+    startTime: '',
+    endTime: '',
+    team: '',
+    headcount: 0,
+    responsiblePerson: '',
+    intensity: '',
+    notes: '',
+    hasConflict: false,
+    conflictWith: [],
+    status: PLAN_STATUS.DRAFT,
+    rejectReason: '',
+    approvalComment: '',
+    submittedAt: '',
+    approvedAt: '',
+    publishedAt: '',
+    createdBy: 'executor',
+    ...overrides
+  }
+}
+
 const _seedPlans = [
-  { id: generateId(), date: today, venue: '主训练场', startTime: '08:00', endTime: '10:00', team: '猎鹰突击队', headcount: 20, responsiblePerson: '张指挥', intensity: 'high', notes: '综合战术演练', hasConflict: false, conflictWith: [] },
-  { id: generateId(), date: today, venue: '主训练场', startTime: '10:30', endTime: '12:00', team: '雷霆特战队', headcount: 15, responsiblePerson: '李教官', intensity: 'medium', notes: '射击训练', hasConflict: false, conflictWith: [] },
-  { id: generateId(), date: today, venue: '主训练场', startTime: '09:30', endTime: '11:30', team: '利刃先锋队', headcount: 12, responsiblePerson: '刘副官', intensity: 'medium', notes: '障碍突破（冲突项）', hasConflict: false, conflictWith: [] },
-  { id: generateId(), date: today, venue: '副训练场', startTime: '09:00', endTime: '11:00', team: '钢铁卫士队', headcount: 25, responsiblePerson: '王队长', intensity: 'low', notes: '体能拉练', hasConflict: false, conflictWith: [] },
-  { id: generateId(), date: today, venue: '体能训练馆', startTime: '14:00', endTime: '16:00', team: '利刃先锋队', headcount: 18, responsiblePerson: '赵教练', intensity: 'high', notes: '力量训练', hasConflict: false, conflictWith: [] },
-  { id: generateId(), date: today, venue: '战术模拟室', startTime: '11:00', endTime: '14:00', team: '猎鹰突击队', headcount: 10, responsiblePerson: '张指挥', intensity: 'medium', notes: '跨午休模拟演练', hasConflict: false, conflictWith: [] }
+  makePlan({ venue: '主训练场', startTime: '08:00', endTime: '10:00', team: '猎鹰突击队', headcount: 20, responsiblePerson: '张指挥', intensity: 'high', notes: '综合战术演练', status: PLAN_STATUS.PUBLISHED, createdBy: 'executor', submittedAt: '2026-06-07T09:00:00', approvedAt: '2026-06-07T10:30:00', publishedAt: '2026-06-07T14:00:00' }),
+  makePlan({ venue: '主训练场', startTime: '10:30', endTime: '12:00', team: '雷霆特战队', headcount: 15, responsiblePerson: '李教官', intensity: 'medium', notes: '射击训练', status: PLAN_STATUS.APPROVED, createdBy: 'executor', submittedAt: '2026-06-07T11:00:00', approvedAt: '2026-06-07T15:00:00' }),
+  makePlan({ venue: '主训练场', startTime: '09:30', endTime: '11:30', team: '利刃先锋队', headcount: 12, responsiblePerson: '刘副官', intensity: 'medium', notes: '障碍突破（冲突项）', status: PLAN_STATUS.PENDING_APPROVAL, createdBy: 'executor', submittedAt: '2026-06-08T08:00:00' }),
+  makePlan({ venue: '副训练场', startTime: '09:00', endTime: '11:00', team: '钢铁卫士队', headcount: 25, responsiblePerson: '王队长', intensity: 'low', notes: '体能拉练', status: PLAN_STATUS.DRAFT, createdBy: 'executor' }),
+  makePlan({ venue: '体能训练馆', startTime: '14:00', endTime: '16:00', team: '利刃先锋队', headcount: 18, responsiblePerson: '赵教练', intensity: 'high', notes: '力量训练', status: PLAN_STATUS.REJECTED, rejectReason: '该时段体能训练馆已有设备维护安排，请调整至15:00之后或更换场地', createdBy: 'executor', submittedAt: '2026-06-07T14:00:00' }),
+  makePlan({ venue: '战术模拟室', startTime: '11:00', endTime: '14:00', team: '猎鹰突击队', headcount: 10, responsiblePerson: '张指挥', intensity: 'medium', notes: '跨午休模拟演练', status: PLAN_STATUS.DRAFT, createdBy: 'executor' })
 ]
 
 const state = reactive({
@@ -30,7 +79,8 @@ const state = reactive({
     venue: '',
     team: '',
     intensity: '',
-    conflictOnly: false
+    conflictOnly: false,
+    status: ''
   }
 })
 
@@ -84,6 +134,7 @@ function checkConflictsForPlan(plan) {
     if (other.id === plan.id) return false
     if (other.venue !== plan.venue) return false
     if (other.date !== plan.date) return false
+    if (other.status === PLAN_STATUS.REJECTED) return false
     const planSegments = getEffectiveSegments(plan.startTime, plan.endTime, state.middayBreak)
     const otherSegments = getEffectiveSegments(other.startTime, other.endTime, state.middayBreak)
     return planSegments.some(ps =>
@@ -98,6 +149,7 @@ export function checkConflictsForPreview(planData, excludeId) {
     if (other.venue !== planData.venue) return false
     if (other.date !== planData.date) return false
     if (!planData.startTime || !planData.endTime) return false
+    if (other.status === PLAN_STATUS.REJECTED) return false
     const planSegments = getEffectiveSegments(planData.startTime, planData.endTime, state.middayBreak)
     const otherSegments = getEffectiveSegments(other.startTime, other.endTime, state.middayBreak)
     return planSegments.some(ps =>
@@ -114,9 +166,24 @@ function recalculateAllConflicts() {
   })
 }
 
+function canTransition(planId, fromStatus, toStatus) {
+  const plan = state.plans.find(p => p.id === planId)
+  if (!plan) return false
+  if (plan.status !== fromStatus) return false
+  const role = state.currentRole
+  const allowed = {
+    [`${PLAN_STATUS.DRAFT}->${PLAN_STATUS.PENDING_APPROVAL}`]: ['executor'],
+    [`${PLAN_STATUS.PENDING_APPROVAL}->${PLAN_STATUS.APPROVED}`]: ['supervisor'],
+    [`${PLAN_STATUS.PENDING_APPROVAL}->${PLAN_STATUS.REJECTED}`]: ['supervisor'],
+    [`${PLAN_STATUS.REJECTED}->${PLAN_STATUS.PENDING_APPROVAL}`]: ['executor'],
+    [`${PLAN_STATUS.APPROVED}->${PLAN_STATUS.PUBLISHED}`]: ['organizer']
+  }
+  const key = `${fromStatus}->${toStatus}`
+  return allowed[key] ? allowed[key].includes(role) : false
+}
+
 function addPlan(planData) {
-  const plan = {
-    id: generateId(),
+  const plan = makePlan({
     date: planData.date || state.selectedDate,
     venue: planData.venue,
     startTime: planData.startTime,
@@ -126,9 +193,9 @@ function addPlan(planData) {
     responsiblePerson: planData.responsiblePerson,
     intensity: planData.intensity,
     notes: planData.notes || '',
-    hasConflict: false,
-    conflictWith: []
-  }
+    status: planData.status || PLAN_STATUS.DRAFT,
+    createdBy: state.currentRole === 'executor' ? 'executor' : state.currentRole
+  })
   state.plans.push(plan)
   recalculateAllConflicts()
   return plan
@@ -137,19 +204,82 @@ function addPlan(planData) {
 function updatePlan(id, planData) {
   const index = state.plans.findIndex(p => p.id === id)
   if (index !== -1) {
+    const plan = state.plans[index]
+    if (plan.status !== PLAN_STATUS.DRAFT && plan.status !== PLAN_STATUS.REJECTED) return
     Object.assign(state.plans[index], planData)
     recalculateAllConflicts()
   }
 }
 
 function deletePlan(id) {
+  const plan = state.plans.find(p => p.id === id)
+  if (!plan) return
+  if (plan.status !== PLAN_STATUS.DRAFT && plan.status !== PLAN_STATUS.REJECTED) return
   state.plans = state.plans.filter(p => p.id !== id)
   recalculateAllConflicts()
 }
 
+function submitPlan(id) {
+  if (!canTransition(id, PLAN_STATUS.DRAFT, PLAN_STATUS.PENDING_APPROVAL)) return false
+  const plan = state.plans.find(p => p.id === id)
+  if (!plan) return false
+  plan.status = PLAN_STATUS.PENDING_APPROVAL
+  plan.submittedAt = new Date().toISOString()
+  plan.rejectReason = ''
+  plan.approvalComment = ''
+  recalculateAllConflicts()
+  return true
+}
+
+function approvePlan(id, comment) {
+  if (!canTransition(id, PLAN_STATUS.PENDING_APPROVAL, PLAN_STATUS.APPROVED)) return false
+  const plan = state.plans.find(p => p.id === id)
+  if (!plan) return false
+  plan.status = PLAN_STATUS.APPROVED
+  plan.approvedAt = new Date().toISOString()
+  plan.approvalComment = comment || ''
+  plan.rejectReason = ''
+  recalculateAllConflicts()
+  return true
+}
+
+function rejectPlan(id, reason) {
+  if (!canTransition(id, PLAN_STATUS.PENDING_APPROVAL, PLAN_STATUS.REJECTED)) return false
+  const plan = state.plans.find(p => p.id === id)
+  if (!plan) return false
+  plan.status = PLAN_STATUS.REJECTED
+  plan.rejectReason = reason || ''
+  plan.approvalComment = ''
+  recalculateAllConflicts()
+  return true
+}
+
+function resubmitPlan(id) {
+  if (!canTransition(id, PLAN_STATUS.REJECTED, PLAN_STATUS.PENDING_APPROVAL)) return false
+  const plan = state.plans.find(p => p.id === id)
+  if (!plan) return false
+  plan.status = PLAN_STATUS.PENDING_APPROVAL
+  plan.submittedAt = new Date().toISOString()
+  plan.rejectReason = ''
+  recalculateAllConflicts()
+  return true
+}
+
+function publishPlan(id) {
+  if (!canTransition(id, PLAN_STATUS.APPROVED, PLAN_STATUS.PUBLISHED)) return false
+  const plan = state.plans.find(p => p.id === id)
+  if (!plan) return false
+  plan.status = PLAN_STATUS.PUBLISHED
+  plan.publishedAt = new Date().toISOString()
+  recalculateAllConflicts()
+  return true
+}
+
 function endEarly(id, newEndTime) {
   const plan = state.plans.find(p => p.id === id)
-  if (plan && timeToMinutes(newEndTime) > timeToMinutes(plan.startTime)) {
+  if (!plan) return
+  if (plan.status !== PLAN_STATUS.PUBLISHED) return
+  if (timeToMinutes(newEndTime) > timeToMinutes(plan.startTime)) {
     plan.endTime = newEndTime
     recalculateAllConflicts()
   }
@@ -157,13 +287,17 @@ function endEarly(id, newEndTime) {
 
 function extendTemporarily(id, newEndTime) {
   const plan = state.plans.find(p => p.id === id)
-  if (plan && timeToMinutes(newEndTime) > timeToMinutes(plan.startTime)) {
+  if (!plan) return
+  if (plan.status !== PLAN_STATUS.PUBLISHED) return
+  if (timeToMinutes(newEndTime) > timeToMinutes(plan.startTime)) {
     plan.endTime = newEndTime
     recalculateAllConflicts()
   }
 }
 
 function startEdit(plan) {
+  if (plan.status !== PLAN_STATUS.DRAFT && plan.status !== PLAN_STATUS.REJECTED) return
+  if (state.currentRole !== 'executor') return
   state.editingPlanId = plan.id
   state.showForm = true
 }
@@ -178,22 +312,41 @@ function closeForm() {
   state.showForm = false
 }
 
-const filteredPlans = computed(() => {
+function getVisiblePlans() {
+  const role = state.currentRole
   return state.plans.filter(plan => {
+    if (role === 'executor') return true
+    if (role === 'supervisor') {
+      return plan.status !== PLAN_STATUS.DRAFT
+    }
+    if (role === 'organizer') {
+      return plan.status === PLAN_STATUS.APPROVED || plan.status === PLAN_STATUS.PUBLISHED
+    }
+    return false
+  })
+}
+
+const filteredPlans = computed(() => {
+  return getVisiblePlans().filter(plan => {
     if (state.filters.venue && plan.venue !== state.filters.venue) return false
     if (state.filters.team && plan.team !== state.filters.team) return false
     if (state.filters.intensity && plan.intensity !== state.filters.intensity) return false
     if (state.filters.conflictOnly && !plan.hasConflict) return false
+    if (state.filters.status && plan.status !== state.filters.status) return false
     return true
   })
 })
 
 const plansForDate = computed(() => {
-  return state.plans.filter(plan => plan.date === state.selectedDate)
+  return getVisiblePlans().filter(plan => plan.date === state.selectedDate)
 })
 
 const allConflicts = computed(() => {
-  return state.plans.filter(plan => plan.hasConflict)
+  return getVisiblePlans().filter(plan => plan.hasConflict)
+})
+
+const pendingApprovalPlans = computed(() => {
+  return state.plans.filter(p => p.status === PLAN_STATUS.PENDING_APPROVAL)
 })
 
 const editingPlan = computed(() => {
@@ -225,7 +378,7 @@ function removeTeam(name) {
 
 function exportData() {
   const data = {
-    version: 1,
+    version: 2,
     exportDate: new Date().toISOString(),
     venues: [...state.venues],
     teams: [...state.teams],
@@ -252,7 +405,17 @@ function importData(jsonString) {
       if (data.middayBreak) {
         state.middayBreak = data.middayBreak
       }
-      state.plans = data.plans
+      state.plans = data.plans.map(p => ({
+        ...makePlan(),
+        ...p,
+        status: Object.values(PLAN_STATUS).includes(p.status) ? p.status : PLAN_STATUS.DRAFT,
+        rejectReason: p.rejectReason || '',
+        approvalComment: p.approvalComment || '',
+        submittedAt: p.submittedAt || '',
+        approvedAt: p.approvedAt || '',
+        publishedAt: p.publishedAt || '',
+        createdBy: p.createdBy || 'executor'
+      }))
       const maxNum = state.plans.reduce((max, p) => {
         const num = parseInt(p.id.split('_')[1]) || 0
         return num > max ? num : max
@@ -279,11 +442,17 @@ export const store = {
   startEdit,
   startNew,
   closeForm,
+  submitPlan,
+  approvePlan,
+  rejectPlan,
+  resubmitPlan,
+  publishPlan,
   checkConflictsForPreview,
   recalculateAllConflicts,
   filteredPlans,
   plansForDate,
   allConflicts,
+  pendingApprovalPlans,
   editingPlan,
   addVenue,
   removeVenue,

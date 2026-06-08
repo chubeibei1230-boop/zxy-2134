@@ -22,17 +22,25 @@
         </label>
       </div>
       <div class="header-right">
+        <div class="pending-badge" v-if="isSupervisor && pendingCount > 0" @click="setStatusFilter('pending_approval')">
+          <span class="badge-icon">🔔</span>
+          <span class="badge-text">{{ pendingCount }} 条待审批</span>
+        </div>
+        <div class="publish-badge" v-if="isOrganizer && approvedCount > 0" @click="setStatusFilter('approved')">
+          <span class="badge-icon">📋</span>
+          <span class="badge-text">{{ approvedCount }} 条待发布</span>
+        </div>
         <button class="header-btn" @click="store.exportData()" title="导出计划">
           📤 导出
         </button>
-        <label class="header-btn import-btn" title="导入计划" v-if="!isSupervisor">
+        <label class="header-btn import-btn" title="导入计划" v-if="isExecutor">
           📥 导入
           <input type="file" accept=".json" @change="handleImport" ref="fileInput" />
         </label>
         <button
           class="header-btn primary"
           @click="store.startNew()"
-          v-if="store.state.currentRole === 'organizer' || store.state.currentRole === 'executor'"
+          v-if="isExecutor"
         >
           + 新建计划
         </button>
@@ -122,6 +130,45 @@
           </div>
         </div>
 
+        <div class="sidebar-section" v-if="isExecutor">
+          <div class="section-header">
+            <h3>我的待处理</h3>
+          </div>
+          <div class="todo-list" v-if="executorTodoItems.length > 0">
+            <div class="todo-item" v-for="item in executorTodoItems" :key="item.id" @click="store.startEdit(item)">
+              <span class="todo-badge rejected">已驳回</span>
+              <span class="todo-text">{{ item.team }} · {{ item.venue }}</span>
+            </div>
+          </div>
+          <div class="todo-empty" v-else>暂无待处理事项</div>
+        </div>
+
+        <div class="sidebar-section" v-if="isSupervisor">
+          <div class="section-header">
+            <h3>待审批</h3>
+          </div>
+          <div class="todo-list" v-if="supervisorTodoItems.length > 0">
+            <div class="todo-item" v-for="item in supervisorTodoItems" :key="item.id">
+              <span class="todo-badge pending">待审批</span>
+              <span class="todo-text">{{ item.team }} · {{ item.venue }} · {{ item.startTime }}-{{ item.endTime }}</span>
+            </div>
+          </div>
+          <div class="todo-empty" v-else>暂无待审批事项</div>
+        </div>
+
+        <div class="sidebar-section" v-if="isOrganizer">
+          <div class="section-header">
+            <h3>待发布</h3>
+          </div>
+          <div class="todo-list" v-if="organizerTodoItems.length > 0">
+            <div class="todo-item" v-for="item in organizerTodoItems" :key="item.id">
+              <span class="todo-badge approved">已通过</span>
+              <span class="todo-text">{{ item.team }} · {{ item.venue }} · {{ item.startTime }}-{{ item.endTime }}</span>
+            </div>
+          </div>
+          <div class="todo-empty" v-else>暂无待发布事项</div>
+        </div>
+
         <ConflictPanel />
       </aside>
 
@@ -151,7 +198,7 @@
 
 <script setup>
 import { ref, computed, nextTick } from 'vue'
-import { store } from './store.js'
+import { store, PLAN_STATUS } from './store.js'
 import PlanForm from './components/PlanForm.vue'
 import PlanList from './components/PlanList.vue'
 import TimelinePreview from './components/TimelinePreview.vue'
@@ -176,6 +223,25 @@ const venueInput = ref(null)
 const showAddTeam = ref(false)
 const newTeamName = ref('')
 const teamInput = ref(null)
+
+const pendingCount = computed(() => store.pendingApprovalPlans.value.length)
+const approvedCount = computed(() => store.state.plans.filter(p => p.status === PLAN_STATUS.APPROVED).length)
+
+const executorTodoItems = computed(() =>
+  store.state.plans.filter(p => p.status === PLAN_STATUS.REJECTED)
+)
+
+const supervisorTodoItems = computed(() =>
+  store.pendingApprovalPlans.value
+)
+
+const organizerTodoItems = computed(() =>
+  store.state.plans.filter(p => p.status === PLAN_STATUS.APPROVED)
+)
+
+function setStatusFilter(status) {
+  store.state.filters.status = status
+}
 
 function addVenue() {
   if (newVenueName.value.trim()) {
@@ -342,6 +408,47 @@ body {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.pending-badge,
+.publish-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.pending-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.pending-badge:hover {
+  background: rgba(245, 158, 11, 0.25);
+}
+
+.publish-badge {
+  background: rgba(99, 102, 241, 0.15);
+  color: #6366f1;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.publish-badge:hover {
+  background: rgba(99, 102, 241, 0.25);
+}
+
+.badge-icon {
+  font-size: 14px;
+}
+
+.badge-text {
+  font-weight: 600;
 }
 
 .header-btn {
@@ -559,6 +666,63 @@ body {
 .break-apply:hover {
   background: var(--accent);
   color: white;
+}
+
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.todo-item:hover {
+  background: var(--bg-hover);
+}
+
+.todo-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.todo-badge.rejected {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+}
+
+.todo-badge.pending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+}
+
+.todo-badge.approved {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+}
+
+.todo-text {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0;
 }
 
 .main-content {

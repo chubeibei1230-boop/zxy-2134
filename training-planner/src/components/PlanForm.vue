@@ -2,8 +2,16 @@
   <div class="plan-form-overlay" v-if="store.state.showForm" @click.self="cancel">
     <div class="plan-form">
       <div class="form-header">
-        <h3>{{ isEdit ? '编辑计划' : '新建计划' }}</h3>
+        <h3>{{ formTitle }}</h3>
         <button class="btn-icon" @click="cancel">✕</button>
+      </div>
+
+      <div class="form-reject-notice" v-if="isEdit && editingPlanData?.status === PLAN_STATUS.REJECTED">
+        <div class="reject-notice-title">⚠ 该计划已被驳回</div>
+        <div class="reject-notice-reason" v-if="editingPlanData?.rejectReason">
+          驳回原因：{{ editingPlanData.rejectReason }}
+        </div>
+        <div class="reject-notice-hint">请根据驳回原因修改后重新提交</div>
       </div>
 
       <div class="form-body">
@@ -81,15 +89,29 @@
             <span class="conflict-team">{{ c.team }}</span>
             <span class="conflict-time">{{ c.startTime }}-{{ c.endTime }}</span>
             <span class="conflict-venue">{{ c.venue }}</span>
+            <span
+              class="conflict-status"
+              :style="{ background: STATUS_COLORS[c.status].bg, color: STATUS_COLORS[c.status].color }"
+            >{{ STATUS_LABELS[c.status] }}</span>
           </div>
         </div>
       </div>
 
       <div class="form-footer">
         <button class="btn btn-secondary" @click="cancel">取消</button>
-        <button class="btn btn-primary" @click="submit" :disabled="!canSubmit">
-          {{ isEdit ? '保存修改' : '创建计划' }}
-        </button>
+        <template v-if="isExecutor">
+          <button class="btn btn-draft" @click="saveDraft" :disabled="!canSaveDraft">
+            {{ isEdit && editingPlanData?.status === PLAN_STATUS.REJECTED ? '保存修改' : '保存草稿' }}
+          </button>
+          <button class="btn btn-primary" @click="submitAndApprove" :disabled="!canSubmit">
+            {{ isEdit && editingPlanData?.status === PLAN_STATUS.REJECTED ? '修改并重新提交' : '创建并提交审批' }}
+          </button>
+        </template>
+        <template v-else>
+          <button class="btn btn-primary" @click="saveDraft" :disabled="!canSaveDraft">
+            保存
+          </button>
+        </template>
       </div>
     </div>
   </div>
@@ -97,11 +119,19 @@
 
 <script setup>
 import { reactive, computed, watch } from 'vue'
-import { store, spansMiddayBreak, checkConflictsForPreview, timeToMinutes } from '../store.js'
+import { store, spansMiddayBreak, checkConflictsForPreview, timeToMinutes, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS } from '../store.js'
 
 const isEdit = computed(() => !!store.state.editingPlanId)
-const isOrganizer = computed(() => store.state.currentRole === 'organizer')
 const isExecutor = computed(() => store.state.currentRole === 'executor')
+
+const editingPlanData = computed(() => store.editingPlan.value)
+
+const formTitle = computed(() => {
+  if (!isEdit.value) return '新建计划'
+  const plan = editingPlanData.value
+  if (plan?.status === PLAN_STATUS.REJECTED) return '修改计划（已驳回）'
+  return '编辑计划'
+})
 
 const form = reactive({
   date: store.state.selectedDate,
@@ -133,9 +163,11 @@ const timeOrderError = computed(() => {
   return timeToMinutes(form.endTime) <= timeToMinutes(form.startTime)
 })
 
-const canSubmit = computed(() => {
+const canSaveDraft = computed(() => {
   return form.date && form.venue && form.startTime && form.endTime && form.team && form.intensity && !timeOrderError.value
 })
+
+const canSubmit = computed(() => canSaveDraft.value)
 
 watch(() => store.state.editingPlanId, (newId) => {
   if (newId) {
@@ -174,22 +206,46 @@ function resetForm() {
   form.notes = ''
 }
 
-function submit() {
-  if (!canSubmit.value) return
+function saveDraft() {
+  if (!canSaveDraft.value) return
+  const planData = {
+    date: form.date,
+    venue: form.venue,
+    startTime: form.startTime,
+    endTime: form.endTime,
+    team: form.team,
+    headcount: form.headcount,
+    responsiblePerson: form.responsiblePerson,
+    intensity: form.intensity,
+    notes: form.notes
+  }
   if (isEdit.value) {
-    store.updatePlan(store.state.editingPlanId, {
-      date: form.date,
-      venue: form.venue,
-      startTime: form.startTime,
-      endTime: form.endTime,
-      team: form.team,
-      headcount: form.headcount,
-      responsiblePerson: form.responsiblePerson,
-      intensity: form.intensity,
-      notes: form.notes
-    })
+    store.updatePlan(store.state.editingPlanId, planData)
   } else {
-    store.addPlan({ ...form })
+    store.addPlan({ ...planData, status: PLAN_STATUS.DRAFT })
+  }
+  store.closeForm()
+}
+
+function submitAndApprove() {
+  if (!canSubmit.value) return
+  const planData = {
+    date: form.date,
+    venue: form.venue,
+    startTime: form.startTime,
+    endTime: form.endTime,
+    team: form.team,
+    headcount: form.headcount,
+    responsiblePerson: form.responsiblePerson,
+    intensity: form.intensity,
+    notes: form.notes
+  }
+  if (isEdit.value) {
+    store.updatePlan(store.state.editingPlanId, planData)
+    store.resubmitPlan(store.state.editingPlanId)
+  } else {
+    const plan = store.addPlan({ ...planData, status: PLAN_STATUS.DRAFT })
+    store.submitPlan(plan.id)
   }
   store.closeForm()
 }
@@ -246,6 +302,35 @@ function cancel() {
 
 .btn-icon:hover {
   background: var(--bg-hover);
+}
+
+.form-reject-notice {
+  margin: 16px 24px 0;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.reject-notice-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #dc2626;
+  margin-bottom: 6px;
+}
+
+.reject-notice-reason {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  background: rgba(239, 68, 68, 0.06);
+  border-radius: 4px;
+}
+
+.reject-notice-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .form-body {
@@ -346,6 +431,7 @@ function cancel() {
   font-size: 13px;
   color: var(--text-secondary);
   padding: 4px 0;
+  align-items: center;
 }
 
 .conflict-team {
@@ -359,6 +445,13 @@ function cancel() {
 
 .conflict-venue {
   color: var(--text-secondary);
+}
+
+.conflict-status {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .form-footer {
@@ -401,5 +494,16 @@ function cancel() {
 
 .btn-secondary:hover:not(:disabled) {
   background: var(--border);
+}
+
+.btn-draft {
+  background: rgba(107, 114, 128, 0.2);
+  color: #9ca3af;
+  border: 1px solid rgba(107, 114, 128, 0.3);
+}
+
+.btn-draft:hover:not(:disabled) {
+  background: rgba(107, 114, 128, 0.3);
+  color: var(--text-primary);
 }
 </style>

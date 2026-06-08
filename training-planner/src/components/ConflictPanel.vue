@@ -12,6 +12,10 @@
           <span class="conflict-date">{{ c.date }}</span>
           <span class="conflict-time">{{ c.startTime }}-{{ c.endTime }}</span>
           <span class="conflict-team">{{ c.team }}</span>
+          <span
+            class="conflict-status-badge"
+            :style="{ background: STATUS_COLORS[c.status].bg, color: STATUS_COLORS[c.status].color }"
+          >{{ STATUS_LABELS[c.status] }}</span>
         </div>
         <div class="conflict-detail">
           与以下计划冲突：
@@ -31,7 +35,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { store } from '../store.js'
+import { store, STATUS_LABELS, STATUS_COLORS } from '../store.js'
 
 const expanded = ref(true)
 
@@ -45,8 +49,10 @@ function getPlanLabel(id) {
 
 function goToPlan(id) {
   const plan = store.state.plans.find(p => p.id === id)
-  if (plan) {
-    store.startEdit(plan)
+  if (plan && (plan.status === 'draft' || plan.status === 'rejected')) {
+    if (store.state.currentRole === 'executor') {
+      store.startEdit(plan)
+    }
   }
 }
 </script>
@@ -108,6 +114,8 @@ function goToPlan(id) {
   gap: 10px;
   font-size: 13px;
   margin-bottom: 4px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .conflict-venue {
@@ -126,6 +134,13 @@ function goToPlan(id) {
 
 .conflict-team {
   color: var(--text-primary);
+}
+
+.conflict-status-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .conflict-detail {

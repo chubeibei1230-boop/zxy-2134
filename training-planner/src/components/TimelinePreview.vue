@@ -45,12 +45,20 @@
                   class="slot-plan"
                   :class="[
                     plan.intensity,
-                    { conflict: plan.hasConflict }
+                    {
+                      conflict: plan.hasConflict,
+                      'status-draft': plan.status === PLAN_STATUS.DRAFT,
+                      'status-pending': plan.status === PLAN_STATUS.PENDING_APPROVAL,
+                      'status-approved': plan.status === PLAN_STATUS.APPROVED,
+                      'status-rejected': plan.status === PLAN_STATUS.REJECTED,
+                      'status-published': plan.status === PLAN_STATUS.PUBLISHED
+                    }
                   ]"
-                  :title="`${plan.team} | ${plan.startTime}-${plan.endTime} | ${plan.responsiblePerson} | ${plan.hasConflict ? '⚠ 冲突' : '正常'}`"
-                  @click="store.startEdit(plan)"
+                  :title="slotPlanTooltip(plan)"
+                  @click="handlePlanClick(plan)"
                 >
-                  {{ plan.team }}
+                  <span class="slot-plan-name">{{ plan.team }}</span>
+                  <span class="slot-plan-status-dot" :style="{ background: STATUS_COLORS[plan.status].color }"></span>
                 </div>
               </template>
             </td>
@@ -65,13 +73,19 @@
       <span class="legend-item"><span class="legend-color high"></span>高强度</span>
       <span class="legend-item"><span class="legend-color conflict"></span>冲突</span>
       <span class="legend-item"><span class="legend-color break"></span>午休</span>
+      <span class="legend-separator">|</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#6b7280"></span>草稿</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#d97706"></span>待审批</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#16a34a"></span>已通过</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#dc2626"></span>已驳回</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#6366f1"></span>已发布</span>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
-import { store, timeToMinutes, minutesToTime, getEffectiveSegments } from '../store.js'
+import { store, timeToMinutes, minutesToTime, getEffectiveSegments, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS } from '../store.js'
 
 const timeStart = ref(6 * 60)
 const timeEnd = ref(21 * 60)
@@ -110,18 +124,21 @@ function getSlotPlans(venue, slot) {
   )
 }
 
-function slotTooltip(venue, slot) {
-  const plans = getSlotPlans(venue, slot)
-  if (plans.length === 0) return ''
-  return plans.map(p =>
-    `${p.team} | ${p.startTime}-${p.endTime} | ${p.responsiblePerson} | ${p.hasConflict ? '⚠ 冲突' : '正常'}`
-  ).join('\n')
+function slotPlanTooltip(plan) {
+  const statusLabel = STATUS_LABELS[plan.status]
+  const conflictLabel = plan.hasConflict ? '⚠ 冲突' : '正常'
+  let tip = `${plan.team} | ${plan.startTime}-${plan.endTime} | ${plan.responsiblePerson} | ${conflictLabel} | ${statusLabel}`
+  if (plan.status === PLAN_STATUS.REJECTED && plan.rejectReason) {
+    tip += ` | 驳回原因：${plan.rejectReason}`
+  }
+  return tip
 }
 
-function onSlotClick(venue, slot) {
-  const plans = getSlotPlans(venue, slot)
-  if (plans.length > 0) {
-    store.startEdit(plans[0])
+function handlePlanClick(plan) {
+  if (plan.status === PLAN_STATUS.DRAFT || plan.status === PLAN_STATUS.REJECTED) {
+    if (store.state.currentRole === 'executor') {
+      store.startEdit(plan)
+    }
   }
 }
 </script>
@@ -261,32 +278,43 @@ function onSlotClick(venue, slot) {
   transition: filter 0.15s;
   margin-bottom: 1px;
   line-height: 1.4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
 }
 
 .slot-plan:hover {
   filter: brightness(1.1);
 }
 
-.slot-plan.low {
-  background: rgba(34, 197, 94, 0.2);
-  color: #15803d;
+.slot-plan-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.slot-plan.medium {
-  background: rgba(245, 158, 11, 0.2);
-  color: #b45309;
+.slot-plan-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
-.slot-plan.high {
-  background: rgba(239, 68, 68, 0.2);
-  color: #b91c1c;
-}
+.slot-plan.low { background: rgba(34, 197, 94, 0.2); color: #15803d; }
+.slot-plan.medium { background: rgba(245, 158, 11, 0.2); color: #b45309; }
+.slot-plan.high { background: rgba(239, 68, 68, 0.2); color: #b91c1c; }
 
 .slot-plan.conflict {
   outline: 2px solid #ef4444;
   outline-offset: -1px;
   animation: pulse-conflict 2s infinite;
 }
+
+.slot-plan.status-draft { border-left: 2px solid #6b7280; }
+.slot-plan.status-pending { border-left: 2px solid #d97706; }
+.slot-plan.status-approved { border-left: 2px solid #16a34a; }
+.slot-plan.status-rejected { border-left: 2px solid #dc2626; opacity: 0.6; }
+.slot-plan.status-published { border-left: 2px solid #6366f1; }
 
 @keyframes pulse-conflict {
   0%, 100% { outline-color: #ef4444; }
@@ -300,6 +328,7 @@ function onSlotClick(venue, slot) {
   background: var(--bg-card);
   border-top: 1px solid var(--border);
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .legend-item {
@@ -308,6 +337,11 @@ function onSlotClick(venue, slot) {
   gap: 6px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.legend-separator {
+  color: var(--border);
+  font-size: 12px;
 }
 
 .legend-color {
@@ -321,4 +355,10 @@ function onSlotClick(venue, slot) {
 .legend-color.high { background: rgba(239, 68, 68, 0.3); }
 .legend-color.conflict { background: rgba(239, 68, 68, 0.1); outline: 2px solid #ef4444; }
 .legend-color.break { background: rgba(245, 158, 11, 0.15); }
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
 </style>

@@ -15,6 +15,10 @@
         <option value="medium">中强度</option>
         <option value="high">高强度</option>
       </select>
+      <select v-model="store.state.filters.status" class="filter-select">
+        <option value="">全部状态</option>
+        <option v-for="(label, key) in STATUS_LABELS" :key="key" :value="key">{{ label }}</option>
+      </select>
       <label class="filter-check">
         <input type="checkbox" v-model="store.state.filters.conflictOnly" />
         <span>仅冲突</span>
@@ -30,7 +34,8 @@
       <span class="col-person">负责人</span>
       <span class="col-count">人数</span>
       <span class="col-intensity">强度</span>
-      <span class="col-status">状态</span>
+      <span class="col-plan-status">状态</span>
+      <span class="col-conflict">冲突</span>
       <span class="col-actions">操作</span>
     </div>
 
@@ -39,7 +44,12 @@
         v-for="plan in store.filteredPlans.value"
         :key="plan.id"
         class="list-row"
-        :class="{ 'has-conflict': plan.hasConflict }"
+        :class="{
+          'has-conflict': plan.hasConflict,
+          'is-rejected': plan.status === PLAN_STATUS.REJECTED,
+          'is-pending': plan.status === PLAN_STATUS.PENDING_APPROVAL,
+          'is-draft': plan.status === PLAN_STATUS.DRAFT
+        }"
       >
         <span class="col-date">{{ plan.date }}</span>
         <span class="col-venue">{{ plan.venue }}</span>
@@ -52,17 +62,76 @@
             {{ intensityLabel(plan.intensity) }}
           </span>
         </span>
-        <span class="col-status">
-          <span class="status-badge" :class="plan.hasConflict ? 'conflict' : 'ok'">
+        <span class="col-plan-status">
+          <span
+            class="plan-status-badge"
+            :style="{ background: STATUS_COLORS[plan.status].bg, color: STATUS_COLORS[plan.status].color }"
+          >
+            {{ STATUS_LABELS[plan.status] }}
+          </span>
+        </span>
+        <span class="col-conflict">
+          <span class="conflict-badge" :class="plan.hasConflict ? 'conflict' : 'ok'">
             {{ plan.hasConflict ? '冲突' : '正常' }}
           </span>
         </span>
         <span class="col-actions">
-          <button class="action-btn edit" @click="store.startEdit(plan)" title="编辑" v-if="!isSupervisor">✎</button>
-          <button class="action-btn end-early" @click="handleEndEarly(plan)" title="提前结束" v-if="isExecutor">⏹</button>
-          <button class="action-btn extend" @click="handleExtend(plan)" title="临时延长" v-if="isExecutor">⏩</button>
-          <button class="action-btn delete" @click="handleDelete(plan)" title="删除" v-if="!isSupervisor">🗑</button>
+          <template v-if="isExecutor">
+            <button
+              v-if="plan.status === PLAN_STATUS.DRAFT"
+              class="action-btn edit"
+              @click="store.startEdit(plan)"
+              title="编辑"
+            >✎</button>
+            <button
+              v-if="plan.status === PLAN_STATUS.DRAFT"
+              class="action-btn submit"
+              @click="handleSubmit(plan)"
+              title="提交审批"
+            >📤</button>
+            <button
+              v-if="plan.status === PLAN_STATUS.REJECTED"
+              class="action-btn edit"
+              @click="store.startEdit(plan)"
+              title="修改"
+            >✎</button>
+            <button
+              v-if="plan.status === PLAN_STATUS.REJECTED"
+              class="action-btn resubmit"
+              @click="handleResubmit(plan)"
+              title="重新提交"
+            >🔄</button>
+            <button
+              v-if="plan.status === PLAN_STATUS.DRAFT || plan.status === PLAN_STATUS.REJECTED"
+              class="action-btn delete"
+              @click="handleDelete(plan)"
+              title="删除"
+            >🗑</button>
+          </template>
+          <template v-if="isSupervisor && plan.status === PLAN_STATUS.PENDING_APPROVAL">
+            <button class="action-btn approve" @click="openApprovalDialog(plan, 'approve')" title="通过">✓</button>
+            <button class="action-btn reject" @click="openApprovalDialog(plan, 'reject')" title="驳回">✕</button>
+          </template>
+          <template v-if="isOrganizer && plan.status === PLAN_STATUS.APPROVED">
+            <button class="action-btn publish" @click="handlePublish(plan)" title="发布">📢</button>
+          </template>
+          <template v-if="isExecutor && plan.status === PLAN_STATUS.PUBLISHED">
+            <button class="action-btn end-early" @click="handleEndEarly(plan)" title="提前结束">⏹</button>
+            <button class="action-btn extend" @click="handleExtend(plan)" title="临时延长">⏩</button>
+          </template>
+          <button
+            v-if="plan.status === PLAN_STATUS.REJECTED"
+            class="action-btn info"
+            @click="showRejectReason(plan)"
+            title="查看驳回原因"
+          >ℹ</button>
         </span>
+        <div class="row-reject-reason" v-if="plan.status === PLAN_STATUS.REJECTED && plan.rejectReason">
+          <span class="reject-label">驳回原因：</span>{{ plan.rejectReason }}
+        </div>
+        <div class="row-approval-comment" v-if="(plan.status === PLAN_STATUS.APPROVED || plan.status === PLAN_STATUS.PUBLISHED) && plan.approvalComment">
+          <span class="approve-label">审批意见：</span>{{ plan.approvalComment }}
+        </div>
       </div>
     </div>
 
@@ -90,19 +159,50 @@
         </div>
       </div>
     </div>
+
+    <div class="approval-dialog" v-if="approvalDialog.visible">
+      <div class="approval-overlay" @click="approvalDialog.visible = false"></div>
+      <div class="approval-panel">
+        <h4>{{ approvalDialog.mode === 'approve' ? '审批通过' : '驳回计划' }}</h4>
+        <p class="approval-info">{{ approvalDialog.plan?.team }} · {{ approvalDialog.plan?.venue }} · {{ approvalDialog.plan?.startTime }}-{{ approvalDialog.plan?.endTime }}</p>
+        <div class="approval-field">
+          <label>{{ approvalDialog.mode === 'approve' ? '审批意见（选填）' : '驳回原因（必填）' }}</label>
+          <textarea
+            v-model="approvalDialog.comment"
+            :placeholder="approvalDialog.mode === 'approve' ? '填写审批意见...' : '请填写驳回原因...'"
+            rows="3"
+          ></textarea>
+        </div>
+        <div class="approval-error" v-if="approvalDialog.error">
+          {{ approvalDialog.error }}
+        </div>
+        <div class="approval-actions">
+          <button class="btn btn-secondary" @click="approvalDialog.visible = false">取消</button>
+          <button
+            class="btn"
+            :class="approvalDialog.mode === 'approve' ? 'btn-approve' : 'btn-reject'"
+            @click="confirmApproval"
+            :disabled="approvalDialog.mode === 'reject' && !approvalDialog.comment.trim()"
+          >
+            {{ approvalDialog.mode === 'approve' ? '确认通过' : '确认驳回' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { store, timeToMinutes, minutesToTime } from '../store.js'
+import { ref, computed, reactive } from 'vue'
+import { store, timeToMinutes, minutesToTime, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS } from '../store.js'
 
 const isExecutor = computed(() => store.state.currentRole === 'executor')
 const isSupervisor = computed(() => store.state.currentRole === 'supervisor')
+const isOrganizer = computed(() => store.state.currentRole === 'organizer')
 
 const hasFilters = computed(() => {
   const f = store.state.filters
-  return f.venue || f.team || f.intensity || f.conflictOnly
+  return f.venue || f.team || f.intensity || f.conflictOnly || f.status
 })
 
 function clearFilters() {
@@ -110,6 +210,7 @@ function clearFilters() {
   store.state.filters.team = ''
   store.state.filters.intensity = ''
   store.state.filters.conflictOnly = false
+  store.state.filters.status = ''
 }
 
 function intensityLabel(intensity) {
@@ -156,6 +257,75 @@ function handleDelete(plan) {
   if (confirm(`确定删除 ${plan.team} 在 ${plan.venue} 的训练计划？`)) {
     store.deletePlan(plan.id)
   }
+}
+
+function handleSubmit(plan) {
+  if (confirm(`确定提交「${plan.team} - ${plan.venue}」的计划进行审批？`)) {
+    const result = store.submitPlan(plan.id)
+    if (!result) {
+      alert('提交失败，只有执行人可以提交草稿状态的计划')
+    }
+  }
+}
+
+function handleResubmit(plan) {
+  if (confirm(`确定重新提交「${plan.team} - ${plan.venue}」的计划？`)) {
+    const result = store.resubmitPlan(plan.id)
+    if (!result) {
+      alert('重新提交失败，只有执行人可以重新提交已驳回的计划')
+    }
+  }
+}
+
+function handlePublish(plan) {
+  if (confirm(`确定发布「${plan.team} - ${plan.venue}」的训练计划？发布后将进入正式排期。`)) {
+    const result = store.publishPlan(plan.id)
+    if (!result) {
+      alert('发布失败，只有组织者可以发布已通过的计划')
+    }
+  }
+}
+
+function showRejectReason(plan) {
+  alert(`驳回原因：${plan.rejectReason || '未填写'}`)
+}
+
+const approvalDialog = reactive({
+  visible: false,
+  mode: 'approve',
+  plan: null,
+  comment: '',
+  error: ''
+})
+
+function openApprovalDialog(plan, mode) {
+  approvalDialog.visible = true
+  approvalDialog.mode = mode
+  approvalDialog.plan = plan
+  approvalDialog.comment = ''
+  approvalDialog.error = ''
+}
+
+function confirmApproval() {
+  if (!approvalDialog.plan) return
+  if (approvalDialog.mode === 'reject' && !approvalDialog.comment.trim()) {
+    approvalDialog.error = '驳回时必须填写驳回原因'
+    return
+  }
+  if (approvalDialog.mode === 'approve') {
+    const result = store.approvePlan(approvalDialog.plan.id, approvalDialog.comment)
+    if (!result) {
+      approvalDialog.error = '审批失败，只有监督人可以审批待审批的计划'
+      return
+    }
+  } else {
+    const result = store.rejectPlan(approvalDialog.plan.id, approvalDialog.comment)
+    if (!result) {
+      approvalDialog.error = '驳回失败，只有监督人可以驳回待审批的计划'
+      return
+    }
+  }
+  approvalDialog.visible = false
 }
 </script>
 
@@ -240,6 +410,7 @@ function handleDelete(plan) {
   border-bottom: 1px solid var(--border);
   align-items: center;
   transition: background 0.15s;
+  flex-wrap: wrap;
 }
 
 .list-row:hover {
@@ -247,8 +418,21 @@ function handleDelete(plan) {
 }
 
 .list-row.has-conflict {
+  border-left: 3px solid #ef4444;
+}
+
+.list-row.is-rejected {
   background: rgba(239, 68, 68, 0.04);
   border-left: 3px solid #ef4444;
+}
+
+.list-row.is-pending {
+  background: rgba(245, 158, 11, 0.03);
+  border-left: 3px solid #d97706;
+}
+
+.list-row.is-draft {
+  border-left: 3px solid #6b7280;
 }
 
 .col-date { width: 90px; }
@@ -258,8 +442,33 @@ function handleDelete(plan) {
 .col-person { width: 80px; }
 .col-count { width: 50px; text-align: center; }
 .col-intensity { width: 60px; }
-.col-status { width: 60px; }
-.col-actions { flex: 1; display: flex; gap: 4px; }
+.col-plan-status { width: 72px; }
+.col-conflict { width: 60px; }
+.col-actions { flex: 1; display: flex; gap: 4px; flex-wrap: wrap; }
+
+.row-reject-reason,
+.row-approval-comment {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.row-reject-reason {
+  background: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+}
+
+.row-approval-comment {
+  background: rgba(34, 197, 94, 0.08);
+  color: #16a34a;
+}
+
+.reject-label,
+.approve-label {
+  font-weight: 600;
+}
 
 .intensity-badge {
   display: inline-block;
@@ -273,7 +482,7 @@ function handleDelete(plan) {
 .intensity-badge.medium { background: rgba(245, 158, 11, 0.15); color: #d97706; }
 .intensity-badge.high { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
 
-.status-badge {
+.plan-status-badge {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 10px;
@@ -281,8 +490,16 @@ function handleDelete(plan) {
   font-weight: 500;
 }
 
-.status-badge.ok { background: rgba(34, 197, 94, 0.15); color: #16a34a; }
-.status-badge.conflict { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+.conflict-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.conflict-badge.ok { background: rgba(34, 197, 94, 0.15); color: #16a34a; }
+.conflict-badge.conflict { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
 
 .action-btn {
   width: 28px;
@@ -303,9 +520,51 @@ function handleDelete(plan) {
   background: var(--bg-hover);
 }
 
+.action-btn.submit:hover {
+  border-color: #d97706;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.action-btn.resubmit:hover {
+  border-color: #d97706;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.action-btn.approve {
+  border-color: #16a34a;
+  color: #16a34a;
+}
+
+.action-btn.approve:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.action-btn.reject {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+
+.action-btn.reject:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.action-btn.publish:hover {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+}
+
 .action-btn.delete:hover {
   border-color: #ef4444;
   background: rgba(239, 68, 68, 0.08);
+}
+
+.action-btn.info {
+  border-color: #6366f1;
+  color: #6366f1;
+}
+
+.action-btn.info:hover {
+  background: rgba(99, 102, 241, 0.1);
 }
 
 .list-empty {
@@ -329,14 +588,16 @@ function handleDelete(plan) {
   opacity: 0.7;
 }
 
-.quick-adjust-overlay {
+.quick-adjust-overlay,
+.approval-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
   z-index: 150;
 }
 
-.quick-adjust-panel {
+.quick-adjust-panel,
+.approval-panel {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -344,29 +605,33 @@ function handleDelete(plan) {
   background: var(--bg-card);
   border-radius: 12px;
   padding: 24px;
-  width: 320px;
+  width: 380px;
   z-index: 151;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   border: 1px solid var(--border);
 }
 
-.quick-adjust-panel h4 {
+.quick-adjust-panel h4,
+.approval-panel h4 {
   margin: 0 0 8px;
   font-size: 16px;
   color: var(--text-primary);
 }
 
-.adjust-info {
+.adjust-info,
+.approval-info {
   font-size: 13px;
   color: var(--text-secondary);
   margin: 0 0 16px;
 }
 
-.adjust-time {
+.adjust-time,
+.approval-field {
   margin-bottom: 16px;
 }
 
-.adjust-time label {
+.adjust-time label,
+.approval-field label {
   display: block;
   font-size: 13px;
   color: var(--text-secondary);
@@ -388,13 +653,32 @@ function handleDelete(plan) {
   border-color: var(--accent);
 }
 
-.adjust-error {
+.approval-field textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.approval-field textarea:focus {
+  border-color: var(--accent);
+}
+
+.adjust-error,
+.approval-error {
   font-size: 12px;
   color: #dc2626;
   margin-bottom: 12px;
 }
 
-.adjust-actions {
+.adjust-actions,
+.approval-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -409,6 +693,15 @@ function handleDelete(plan) {
   border: none;
 }
 
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-primary { background: var(--accent); color: white; }
 .btn-secondary { background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--border); }
+.btn-approve { background: #16a34a; color: white; }
+.btn-approve:hover:not(:disabled) { background: #15803d; }
+.btn-reject { background: #dc2626; color: white; }
+.btn-reject:hover:not(:disabled) { background: #b91c1c; }
 </style>
