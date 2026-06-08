@@ -204,8 +204,9 @@ function checkOccupationConflictsForPlan(plan) {
     if (occ.date !== plan.date) return false
     if (!plan.startTime || !plan.endTime) return false
     const planSegments = getEffectiveSegments(plan.startTime, plan.endTime, state.middayBreak)
+    const occSegments = getEffectiveSegments(occ.startTime, occ.endTime, state.middayBreak)
     return planSegments.some(ps =>
-      timesOverlap(ps.start, ps.end, occ.startTime, occ.endTime)
+      occSegments.some(os => timesOverlap(ps.start, ps.end, os.start, os.end))
     )
   })
 }
@@ -217,8 +218,9 @@ function checkOccupationConflictsForPreview(planData, excludeId) {
     if (occ.date !== planData.date) return false
     if (!planData.startTime || !planData.endTime) return false
     const planSegments = getEffectiveSegments(planData.startTime, planData.endTime, state.middayBreak)
+    const occSegments = getEffectiveSegments(occ.startTime, occ.endTime, state.middayBreak)
     return planSegments.some(ps =>
-      timesOverlap(ps.start, ps.end, occ.startTime, occ.endTime)
+      occSegments.some(os => timesOverlap(ps.start, ps.end, os.start, os.end))
     )
   })
 }
@@ -230,10 +232,17 @@ function plansAffectedByOccupation(occupation) {
     if (plan.date !== occupation.date) return false
     if (!plan.startTime || !plan.endTime) return false
     const planSegments = getEffectiveSegments(plan.startTime, plan.endTime, state.middayBreak)
+    const occSegments = getEffectiveSegments(occupation.startTime, occupation.endTime, state.middayBreak)
     return planSegments.some(ps =>
-      timesOverlap(ps.start, ps.end, occupation.startTime, occupation.endTime)
+      occSegments.some(os => timesOverlap(ps.start, ps.end, os.start, os.end))
     )
   })
+}
+
+function plansAffectedByOccupationVisible(occupation) {
+  const visible = getVisiblePlans()
+  const visibleIds = new Set(visible.map(p => p.id))
+  return plansAffectedByOccupation(occupation).filter(p => visibleIds.has(p.id))
 }
 
 export function checkConflictsForPreview(planData, excludeId) {
@@ -491,7 +500,26 @@ function getVisibleOccupations() {
   return state.occupations.filter(occ => {
     if (occ.cancelled) return false
     if (role === 'organizer') return true
-    return true
+    if (role === 'supervisor') {
+      return state.plans.some(p => {
+        if (p.status === PLAN_STATUS.DRAFT || p.status === PLAN_STATUS.REJECTED) return false
+        if (p.venue !== occ.venue || p.date !== occ.date) return false
+        if (!p.startTime || !p.endTime) return false
+        const planSegs = getEffectiveSegments(p.startTime, p.endTime, state.middayBreak)
+        const occSegs = getEffectiveSegments(occ.startTime, occ.endTime, state.middayBreak)
+        return planSegs.some(ps => occSegs.some(os => timesOverlap(ps.start, ps.end, os.start, os.end)))
+      })
+    }
+    if (role === 'executor') {
+      return state.plans.some(p => {
+        if (p.venue !== occ.venue || p.date !== occ.date) return false
+        if (!p.startTime || !p.endTime) return false
+        const planSegs = getEffectiveSegments(p.startTime, p.endTime, state.middayBreak)
+        const occSegs = getEffectiveSegments(occ.startTime, occ.endTime, state.middayBreak)
+        return planSegs.some(ps => occSegs.some(os => timesOverlap(ps.start, ps.end, os.start, os.end)))
+      })
+    }
+    return false
   })
 }
 
@@ -685,6 +713,8 @@ export const store = {
   getOccupationsForDateVenue,
   getVisibleOccupations,
   plansAffectedByOccupation,
+  plansAffectedByOccupationVisible,
+  getVisiblePlans,
   filteredPlans,
   plansForDate,
   allConflicts,

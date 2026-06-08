@@ -93,7 +93,7 @@
 
 <script setup>
 import { reactive, computed, watch } from 'vue'
-import { store, timeToMinutes, OCCUPATION_TYPE_LABELS, OCCUPATION_TYPE_COLORS, STATUS_LABELS, STATUS_COLORS } from '../store.js'
+import { store, timeToMinutes, OCCUPATION_TYPE_LABELS, OCCUPATION_TYPE_COLORS, STATUS_LABELS, STATUS_COLORS, getEffectiveSegments } from '../store.js'
 
 const props = defineProps({
   visible: Boolean
@@ -118,30 +118,41 @@ const timeOrderError = computed(() => {
 
 const affectedPlans = computed(() => {
   if (!form.venue || !form.date || !form.startTime || !form.endTime || timeOrderError.value) return []
+  const visible = store.getVisiblePlans()
+  const visibleIds = new Set(visible.map(p => p.id))
+  const occSegments = getEffectiveSegments(form.startTime, form.endTime, store.state.middayBreak)
   return store.state.plans.filter(plan => {
     if (plan.status === 'rejected') return false
     if (plan.venue !== form.venue) return false
     if (plan.date !== form.date) return false
     if (!plan.startTime || !plan.endTime) return false
-    const s1 = timeToMinutes(form.startTime)
-    const e1 = timeToMinutes(form.endTime)
-    const s2 = timeToMinutes(plan.startTime)
-    const e2 = timeToMinutes(plan.endTime)
-    return s1 < e2 && s2 < e1
+    if (!visibleIds.has(plan.id)) return false
+    const planSegments = getEffectiveSegments(plan.startTime, plan.endTime, store.state.middayBreak)
+    return planSegments.some(ps =>
+      occSegments.some(os => {
+        const psS = timeToMinutes(ps.start), psE = timeToMinutes(ps.end)
+        const osS = timeToMinutes(os.start), osE = timeToMinutes(os.end)
+        return psS < osE && osS < psE
+      })
+    )
   })
 })
 
 const overlappingOccupations = computed(() => {
   if (!form.venue || !form.date || !form.startTime || !form.endTime || timeOrderError.value) return []
+  const newOccSegs = getEffectiveSegments(form.startTime, form.endTime, store.state.middayBreak)
   return store.state.occupations.filter(occ => {
     if (occ.cancelled) return false
     if (occ.venue !== form.venue) return false
     if (occ.date !== form.date) return false
-    const s1 = timeToMinutes(form.startTime)
-    const e1 = timeToMinutes(form.endTime)
-    const s2 = timeToMinutes(occ.startTime)
-    const e2 = timeToMinutes(occ.endTime)
-    return s1 < e2 && s2 < e1
+    const existOccSegs = getEffectiveSegments(occ.startTime, occ.endTime, store.state.middayBreak)
+    return newOccSegs.some(ns =>
+      existOccSegs.some(es => {
+        const nsS = timeToMinutes(ns.start), nsE = timeToMinutes(ns.end)
+        const esS = timeToMinutes(es.start), esE = timeToMinutes(es.end)
+        return nsS < esE && esS < nsE
+      })
+    )
   })
 })
 
@@ -176,9 +187,12 @@ function confirm() {
     reason: form.reason,
     notes: form.notes
   })
-  if (result.affectedPlans.length > 0) {
-    const names = result.affectedPlans
-      .filter(p => p.status !== 'rejected')
+  const visibleAffected = result.affectedPlans.filter(p => {
+    const visible = store.getVisiblePlans()
+    return visible.some(vp => vp.id === p.id)
+  })
+  if (visibleAffected.length > 0) {
+    const names = visibleAffected
       .map(p => `${p.team}(${p.startTime}-${p.endTime})`)
       .join('、')
     alert(`占用已登记！\n\n⚠ 以下计划受到影响：${names}\n这些计划已被标记为占用冲突，相关执行人需调整时段。`)

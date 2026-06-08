@@ -35,9 +35,9 @@
             <span class="occ-time">{{ occ.startTime }}-{{ occ.endTime }}</span>
             <span class="occ-date" v-if="embedded && occ.date !== store.state.selectedDate">{{ occ.date }}</span>
           </div>
-          <div class="occ-reason" v-if="occ.reason">{{ occ.reason }}</div>
-          <div class="occ-notes" v-if="embedded && occ.notes">备注：{{ occ.notes }}</div>
-          <div class="occ-affected" v-if="getAffectedCount(occ) > 0">
+          <div class="occ-reason" v-if="occ.reason && isOrganizer">{{ occ.reason }}</div>
+          <div class="occ-notes" v-if="embedded && occ.notes && isOrganizer">备注：{{ occ.notes }}</div>
+          <div class="occ-affected" v-if="isOrganizer && getAffectedCount(occ) > 0">
             <span class="affected-warn">⚠ 影响 {{ getAffectedCount(occ) }} 条计划</span>
             <template v-if="embedded">
               <span class="affected-detail" v-for="plan in getAffectedPlans(occ)" :key="plan.id">
@@ -100,6 +100,8 @@ const venueFilter = ref('')
 
 const isOrganizer = computed(() => store.state.currentRole === 'organizer')
 
+const isNonOrganizer = computed(() => store.state.currentRole !== 'organizer')
+
 const occupations = computed(() => store.occupationsForDate.value)
 
 const filteredOccupations = computed(() => {
@@ -108,11 +110,11 @@ const filteredOccupations = computed(() => {
 })
 
 function getAffectedCount(occ) {
-  return store.plansAffectedByOccupation(occ).filter(p => p.status !== 'rejected').length
+  return store.plansAffectedByOccupationVisible(occ).length
 }
 
 function getAffectedPlans(occ) {
-  return store.plansAffectedByOccupation(occ).filter(p => p.status !== 'rejected')
+  return store.plansAffectedByOccupationVisible(occ)
 }
 
 function getVenueOccupations(venue) {
@@ -120,11 +122,10 @@ function getVenueOccupations(venue) {
 }
 
 function handleCancel(occ) {
-  const affected = store.plansAffectedByOccupation(occ)
-  const activeAffected = affected.filter(p => p.status !== 'rejected')
+  const affected = store.plansAffectedByOccupationVisible(occ)
   let msg = `确定取消「${occ.venue} ${occ.startTime}-${occ.endTime}」的${OCCUPATION_TYPE_LABELS[occ.type]}占用？`
-  if (activeAffected.length > 0) {
-    msg += `\n\n⚠ 该占用量影响 ${activeAffected.length} 条训练计划，取消后这些计划将恢复可预约状态。`
+  if (affected.length > 0) {
+    msg += `\n\n⚠ 该占用量影响 ${affected.length} 条训练计划，取消后这些计划将恢复可预约状态。`
   }
   if (confirm(msg)) {
     store.cancelOccupation(occ.id)
