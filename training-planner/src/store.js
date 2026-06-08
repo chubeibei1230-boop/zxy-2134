@@ -26,11 +26,37 @@ export const STATUS_COLORS = {
   [PLAN_STATUS.PUBLISHED]: { bg: 'rgba(99,102,241,0.15)', color: '#6366f1' }
 }
 
+export const OCCUPATION_TYPE = {
+  MAINTENANCE: 'maintenance',
+  CLEARANCE: 'clearance',
+  INSPECTION: 'inspection',
+  OTHER: 'other'
+}
+
+export const OCCUPATION_TYPE_LABELS = {
+  [OCCUPATION_TYPE.MAINTENANCE]: '设备维护',
+  [OCCUPATION_TYPE.CLEARANCE]: '清场',
+  [OCCUPATION_TYPE.INSPECTION]: '设备检修',
+  [OCCUPATION_TYPE.OTHER]: '其他占用'
+}
+
+export const OCCUPATION_TYPE_COLORS = {
+  [OCCUPATION_TYPE.MAINTENANCE]: { bg: 'rgba(249,115,22,0.15)', color: '#ea580c' },
+  [OCCUPATION_TYPE.CLEARANCE]: { bg: 'rgba(168,85,247,0.15)', color: '#9333ea' },
+  [OCCUPATION_TYPE.INSPECTION]: { bg: 'rgba(6,182,212,0.15)', color: '#0891b2' },
+  [OCCUPATION_TYPE.OTHER]: { bg: 'rgba(107,114,128,0.15)', color: '#6b7280' }
+}
+
 let nextId = 1
+let nextOccupationId = 1
 const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
 function generateId() {
   return `plan_${nextId++}_${Date.now()}`
+}
+
+function generateOccupationId() {
+  return `occ_${nextOccupationId++}_${Date.now()}`
 }
 
 function makePlan(overrides) {
@@ -47,6 +73,8 @@ function makePlan(overrides) {
     notes: '',
     hasConflict: false,
     conflictWith: [],
+    occupationConflicts: [],
+    affectedByOccupation: false,
     status: PLAN_STATUS.DRAFT,
     rejectReason: '',
     approvalComment: '',
@@ -55,6 +83,24 @@ function makePlan(overrides) {
     publishedAt: '',
     createdBy: 'executor',
     actionSessionId: '',
+    ...overrides
+  }
+}
+
+function makeOccupation(overrides) {
+  return {
+    id: generateOccupationId(),
+    date: today,
+    venue: '',
+    startTime: '',
+    endTime: '',
+    type: OCCUPATION_TYPE.MAINTENANCE,
+    reason: '',
+    notes: '',
+    createdBy: 'organizer',
+    createdAt: new Date().toISOString(),
+    cancelledAt: '',
+    cancelled: false,
     ...overrides
   }
 }
@@ -68,8 +114,14 @@ const _seedPlans = [
   makePlan({ venue: '战术模拟室', startTime: '11:00', endTime: '14:00', team: '猎鹰突击队', headcount: 10, responsiblePerson: '张指挥', intensity: 'medium', notes: '跨午休模拟演练', status: PLAN_STATUS.DRAFT, createdBy: 'executor' })
 ]
 
+const _seedOccupations = [
+  makeOccupation({ venue: '体能训练馆', startTime: '13:00', endTime: '15:00', type: OCCUPATION_TYPE.INSPECTION, reason: '力量器械年检', notes: '需提前清场，检修期间暂停使用', createdBy: 'organizer' }),
+  makeOccupation({ venue: '主训练场', startTime: '15:00', endTime: '17:00', type: OCCUPATION_TYPE.MAINTENANCE, reason: '草坪养护', notes: '草皮修复及灌溉系统维护', createdBy: 'organizer' })
+]
+
 const state = reactive({
   plans: _seedPlans,
+  occupations: _seedOccupations,
   venues: ['主训练场', '副训练场', '体能训练馆', '战术模拟室'],
   teams: ['猎鹰突击队', '雷霆特战队', '钢铁卫士队', '利刃先锋队'],
   currentRole: 'organizer',
@@ -145,6 +197,45 @@ function checkConflictsForPlan(plan) {
   })
 }
 
+function checkOccupationConflictsForPlan(plan) {
+  return state.occupations.filter(occ => {
+    if (occ.cancelled) return false
+    if (occ.venue !== plan.venue) return false
+    if (occ.date !== plan.date) return false
+    if (!plan.startTime || !plan.endTime) return false
+    const planSegments = getEffectiveSegments(plan.startTime, plan.endTime, state.middayBreak)
+    return planSegments.some(ps =>
+      timesOverlap(ps.start, ps.end, occ.startTime, occ.endTime)
+    )
+  })
+}
+
+function checkOccupationConflictsForPreview(planData, excludeId) {
+  return state.occupations.filter(occ => {
+    if (occ.cancelled) return false
+    if (occ.venue !== planData.venue) return false
+    if (occ.date !== planData.date) return false
+    if (!planData.startTime || !planData.endTime) return false
+    const planSegments = getEffectiveSegments(planData.startTime, planData.endTime, state.middayBreak)
+    return planSegments.some(ps =>
+      timesOverlap(ps.start, ps.end, occ.startTime, occ.endTime)
+    )
+  })
+}
+
+function plansAffectedByOccupation(occupation) {
+  return state.plans.filter(plan => {
+    if (plan.status === PLAN_STATUS.REJECTED) return false
+    if (plan.venue !== occupation.venue) return false
+    if (plan.date !== occupation.date) return false
+    if (!plan.startTime || !plan.endTime) return false
+    const planSegments = getEffectiveSegments(plan.startTime, plan.endTime, state.middayBreak)
+    return planSegments.some(ps =>
+      timesOverlap(ps.start, ps.end, occupation.startTime, occupation.endTime)
+    )
+  })
+}
+
 export function checkConflictsForPreview(planData, excludeId) {
   return state.plans.filter(other => {
     if (other.id === excludeId) return false
@@ -163,8 +254,11 @@ export function checkConflictsForPreview(planData, excludeId) {
 function recalculateAllConflicts() {
   state.plans.forEach(plan => {
     const conflicts = checkConflictsForPlan(plan)
-    plan.hasConflict = conflicts.length > 0
+    const occConflicts = checkOccupationConflictsForPlan(plan)
+    plan.hasConflict = conflicts.length > 0 || occConflicts.length > 0
     plan.conflictWith = conflicts.map(c => c.id)
+    plan.occupationConflicts = occConflicts.map(o => o.id)
+    plan.affectedByOccupation = occConflicts.length > 0
   })
 }
 
@@ -268,6 +362,8 @@ function submitPlan(id) {
   if (!canTransition(id, PLAN_STATUS.DRAFT, PLAN_STATUS.PENDING_APPROVAL)) return false
   const plan = state.plans.find(p => p.id === id)
   if (!plan) return false
+  const occConflicts = checkOccupationConflictsForPlan(plan)
+  if (occConflicts.length > 0) return false
   plan.status = PLAN_STATUS.PENDING_APPROVAL
   plan.submittedAt = new Date().toISOString()
   plan.rejectReason = ''
@@ -305,6 +401,8 @@ function resubmitPlan(id) {
   if (!canTransition(id, PLAN_STATUS.REJECTED, PLAN_STATUS.PENDING_APPROVAL)) return false
   const plan = state.plans.find(p => p.id === id)
   if (!plan) return false
+  const occConflicts = checkOccupationConflictsForPlan(plan)
+  if (occConflicts.length > 0) return false
   plan.status = PLAN_STATUS.PENDING_APPROVAL
   plan.submittedAt = new Date().toISOString()
   plan.rejectReason = ''
@@ -354,6 +452,57 @@ function startNew() {
   state.editingPlanId = null
   state.showForm = true
 }
+
+function addOccupation(occData) {
+  const occ = makeOccupation({
+    date: occData.date || state.selectedDate,
+    venue: occData.venue,
+    startTime: occData.startTime,
+    endTime: occData.endTime,
+    type: occData.type || OCCUPATION_TYPE.MAINTENANCE,
+    reason: occData.reason || '',
+    notes: occData.notes || '',
+    createdBy: state.currentRole
+  })
+  state.occupations.push(occ)
+  recalculateAllConflicts()
+  const affected = plansAffectedByOccupation(occ)
+  return { occupation: occ, affectedPlans: affected }
+}
+
+function cancelOccupation(id) {
+  const occ = state.occupations.find(o => o.id === id)
+  if (!occ || occ.cancelled) return
+  occ.cancelled = true
+  occ.cancelledAt = new Date().toISOString()
+  recalculateAllConflicts()
+}
+
+function getOccupationsForDate(date) {
+  return state.occupations.filter(occ => occ.date === date && !occ.cancelled)
+}
+
+function getOccupationsForDateVenue(date, venue) {
+  return state.occupations.filter(occ => occ.date === date && occ.venue === venue && !occ.cancelled)
+}
+
+function getVisibleOccupations() {
+  const role = state.currentRole
+  return state.occupations.filter(occ => {
+    if (occ.cancelled) return false
+    if (role === 'organizer') return true
+    return true
+  })
+}
+
+const occupationsForDate = computed(() => {
+  return getVisibleOccupations().filter(occ => occ.date === state.selectedDate)
+})
+
+const allOccupationConflicts = computed(() => {
+  const visible = getVisiblePlans()
+  return visible.filter(plan => plan.occupationConflicts && plan.occupationConflicts.length > 0)
+})
 
 function closeForm() {
   state.editingPlanId = null
@@ -440,12 +589,13 @@ function removeTeam(name) {
 
 function exportData() {
   const data = {
-    version: 2,
+    version: 3,
     exportDate: new Date().toISOString(),
     venues: [...state.venues],
     teams: [...state.teams],
     middayBreak: { ...state.middayBreak },
-    plans: state.plans.map(p => ({ ...p }))
+    plans: state.plans.map(p => ({ ...p })),
+    occupations: state.occupations.map(o => ({ ...o }))
   }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -477,13 +627,28 @@ function importData(jsonString) {
         approvedAt: p.approvedAt || '',
         publishedAt: p.publishedAt || '',
         createdBy: p.createdBy || 'executor',
-        actionSessionId: p.actionSessionId || ''
+        actionSessionId: p.actionSessionId || '',
+        occupationConflicts: p.occupationConflicts || [],
+        affectedByOccupation: p.affectedByOccupation || false
       }))
       const maxNum = state.plans.reduce((max, p) => {
         const num = parseInt(p.id.split('_')[1]) || 0
         return num > max ? num : max
       }, 0)
       nextId = maxNum + 1
+      if (data.occupations) {
+        state.occupations = data.occupations.map(o => ({
+          ...makeOccupation(),
+          ...o,
+          cancelled: o.cancelled || false,
+          cancelledAt: o.cancelledAt || ''
+        }))
+        const maxOccNum = state.occupations.reduce((max, o) => {
+          const num = parseInt(o.id.split('_')[1]) || 0
+          return num > max ? num : max
+        }, 0)
+        nextOccupationId = maxOccNum + 1
+      }
       recalculateAllConflicts()
       return true
     }
@@ -511,11 +676,20 @@ export const store = {
   resubmitPlan,
   publishPlan,
   checkConflictsForPreview,
+  checkOccupationConflictsForPreview,
   recalculateAllConflicts,
   getTransitionError,
+  addOccupation,
+  cancelOccupation,
+  getOccupationsForDate,
+  getOccupationsForDateVenue,
+  getVisibleOccupations,
+  plansAffectedByOccupation,
   filteredPlans,
   plansForDate,
   allConflicts,
+  allOccupationConflicts,
+  occupationsForDate,
   pendingApprovalPlans,
   editingPlan,
   addVenue,

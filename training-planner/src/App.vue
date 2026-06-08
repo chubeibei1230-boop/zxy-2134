@@ -172,6 +172,8 @@
           <div class="todo-empty" v-else>暂无待发布事项</div>
         </div>
 
+        <OccupationPanel @addOccupation="showOccupationForm = true" />
+
         <ConflictPanel />
       </aside>
 
@@ -187,15 +189,23 @@
             :class="{ active: activeTab === 'timeline' }"
             @click="activeTab = 'timeline'"
           >🕐 时间预览</button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'occupation' }"
+            @click="activeTab = 'occupation'"
+            v-if="isOrganizer"
+          >🔧 场地占用</button>
         </div>
         <div class="tab-content">
           <PlanList v-if="activeTab === 'list'" />
           <TimelinePreview v-if="activeTab === 'timeline'" />
+          <OccupationPanel v-if="activeTab === 'occupation' && isOrganizer" :embedded="true" @addOccupation="showOccupationForm = true" />
         </div>
       </main>
     </div>
 
     <PlanForm />
+    <OccupationForm :visible="showOccupationForm" @close="showOccupationForm = false" @confirmed="showOccupationForm = false" />
   </div>
 </template>
 
@@ -206,6 +216,8 @@ import PlanForm from './components/PlanForm.vue'
 import PlanList from './components/PlanList.vue'
 import TimelinePreview from './components/TimelinePreview.vue'
 import ConflictPanel from './components/ConflictPanel.vue'
+import OccupationPanel from './components/OccupationPanel.vue'
+import OccupationForm from './components/OccupationForm.vue'
 
 const roles = [
   { key: 'organizer', label: '组织者', icon: '🏗' },
@@ -232,6 +244,7 @@ function switchRole(roleKey) {
 }
 
 const activeTab = ref('list')
+const showOccupationForm = ref(false)
 
 const showAddVenue = ref(false)
 const newVenueName = ref('')

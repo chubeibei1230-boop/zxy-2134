@@ -95,6 +95,20 @@
             >{{ STATUS_LABELS[c.status] }}</span>
           </div>
         </div>
+
+        <div class="occupation-conflict-preview" v-if="occupationConflicts.length > 0">
+          <div class="occ-conflict-title">🚫 场地已被占用，不可提交审批</div>
+          <div class="occ-conflict-item" v-for="occ in occupationConflicts" :key="occ.id">
+            <span
+              class="occ-type-badge"
+              :style="{ background: OCCUPATION_TYPE_COLORS[occ.type].bg, color: OCCUPATION_TYPE_COLORS[occ.type].color }"
+            >{{ OCCUPATION_TYPE_LABELS[occ.type] }}</span>
+            <span class="occ-conflict-venue">{{ occ.venue }}</span>
+            <span class="occ-conflict-time">{{ occ.startTime }}-{{ occ.endTime }}</span>
+            <span class="occ-conflict-reason" v-if="occ.reason">{{ occ.reason }}</span>
+          </div>
+          <div class="occ-conflict-hint">请调整时段或更换场地后再提交</div>
+        </div>
       </div>
 
       <div class="form-footer">
@@ -119,7 +133,7 @@
 
 <script setup>
 import { reactive, computed, watch } from 'vue'
-import { store, spansMiddayBreak, checkConflictsForPreview, timeToMinutes, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS } from '../store.js'
+import { store, spansMiddayBreak, checkConflictsForPreview, timeToMinutes, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS, OCCUPATION_TYPE_LABELS, OCCUPATION_TYPE_COLORS } from '../store.js'
 
 const isEdit = computed(() => !!store.state.editingPlanId)
 const isExecutor = computed(() => store.state.currentRole === 'executor')
@@ -158,6 +172,15 @@ const previewConflicts = computed(() => {
   )
 })
 
+const occupationConflicts = computed(() => {
+  if (!form.venue || !form.date || !form.startTime || !form.endTime || timeOrderError.value) return []
+  return store.checkOccupationConflictsForPreview(
+    { venue: form.venue, date: form.date, startTime: form.startTime, endTime: form.endTime }
+  )
+})
+
+const hasOccupationConflict = computed(() => occupationConflicts.value.length > 0)
+
 const timeOrderError = computed(() => {
   if (!form.startTime || !form.endTime) return false
   return timeToMinutes(form.endTime) <= timeToMinutes(form.startTime)
@@ -167,7 +190,7 @@ const canSaveDraft = computed(() => {
   return form.date && form.venue && form.startTime && form.endTime && form.team && form.intensity && !timeOrderError.value
 })
 
-const canSubmit = computed(() => canSaveDraft.value)
+const canSubmit = computed(() => canSaveDraft.value && !hasOccupationConflict.value)
 
 watch(() => store.state.editingPlanId, (newId) => {
   if (newId) {
@@ -513,5 +536,59 @@ function cancel() {
 .btn-draft:hover:not(:disabled) {
   background: rgba(107, 114, 128, 0.3);
   color: var(--text-primary);
+}
+
+.occupation-conflict-preview {
+  background: rgba(249, 115, 22, 0.08);
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 12px;
+}
+
+.occ-conflict-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ea580c;
+  margin-bottom: 8px;
+}
+
+.occ-conflict-item {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+  align-items: center;
+}
+
+.occ-type-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.occ-conflict-venue {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.occ-conflict-time {
+  color: #ea580c;
+  font-variant-numeric: tabular-nums;
+}
+
+.occ-conflict-reason {
+  color: var(--text-secondary);
+}
+
+.occ-conflict-hint {
+  font-size: 12px;
+  color: #ea580c;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(249, 115, 22, 0.15);
 }
 </style>

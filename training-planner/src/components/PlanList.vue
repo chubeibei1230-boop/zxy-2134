@@ -48,7 +48,8 @@
           'has-conflict': plan.hasConflict,
           'is-rejected': plan.status === PLAN_STATUS.REJECTED,
           'is-pending': plan.status === PLAN_STATUS.PENDING_APPROVAL,
-          'is-draft': plan.status === PLAN_STATUS.DRAFT
+          'is-draft': plan.status === PLAN_STATUS.DRAFT,
+          'affected-by-occupation': plan.affectedByOccupation
         }"
       >
         <span class="col-date">{{ plan.date }}</span>
@@ -72,7 +73,7 @@
         </span>
         <span class="col-conflict">
           <span class="conflict-badge" :class="plan.hasConflict ? 'conflict' : 'ok'">
-            {{ plan.hasConflict ? '冲突' : '正常' }}
+            {{ plan.hasConflict ? (plan.affectedByOccupation ? '占用' : '冲突') : '正常' }}
           </span>
         </span>
         <span class="col-actions">
@@ -131,6 +132,12 @@
         </div>
         <div class="row-approval-comment" v-if="(plan.status === PLAN_STATUS.APPROVED || plan.status === PLAN_STATUS.PUBLISHED) && plan.approvalComment">
           <span class="approve-label">审批意见：</span>{{ plan.approvalComment }}
+        </div>
+        <div class="row-occupation-conflict" v-if="plan.affectedByOccupation && plan.occupationConflicts && plan.occupationConflicts.length > 0">
+          <span class="occ-label">🔧 场地占用冲突：</span>
+          <span class="occ-detail" v-for="occId in plan.occupationConflicts" :key="occId">
+            {{ getOccupationLabel(occId) }}
+          </span>
         </div>
       </div>
     </div>
@@ -194,7 +201,7 @@
 
 <script setup>
 import { ref, computed, reactive } from 'vue'
-import { store, timeToMinutes, minutesToTime, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS } from '../store.js'
+import { store, timeToMinutes, minutesToTime, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS, OCCUPATION_TYPE_LABELS, OCCUPATION_TYPE_COLORS } from '../store.js'
 
 const isExecutor = computed(() => store.state.currentRole === 'executor')
 const isSupervisor = computed(() => store.state.currentRole === 'supervisor')
@@ -216,6 +223,12 @@ function clearFilters() {
 function intensityLabel(intensity) {
   const map = { low: '低', medium: '中', high: '高' }
   return map[intensity] || intensity
+}
+
+function getOccupationLabel(id) {
+  const occ = store.state.occupations.find(o => o.id === id)
+  if (!occ) return '(已取消)'
+  return `${OCCUPATION_TYPE_LABELS[occ.type]} ${occ.venue} ${occ.startTime}-${occ.endTime}`
 }
 
 const adjustingPlan = ref(null)
@@ -260,6 +273,11 @@ function handleDelete(plan) {
 }
 
 function handleSubmit(plan) {
+  if (plan.affectedByOccupation) {
+    const occLabels = (plan.occupationConflicts || []).map(id => getOccupationLabel(id)).join('、')
+    alert(`该计划时段与场地占用冲突（${occLabels}），请调整时段或更换场地后再提交`)
+    return
+  }
   if (confirm(`确定提交「${plan.team} - ${plan.venue}」的计划进行审批？`)) {
     const result = store.submitPlan(plan.id)
     if (!result) {
@@ -270,6 +288,11 @@ function handleSubmit(plan) {
 }
 
 function handleResubmit(plan) {
+  if (plan.affectedByOccupation) {
+    const occLabels = (plan.occupationConflicts || []).map(id => getOccupationLabel(id)).join('、')
+    alert(`该计划时段与场地占用冲突（${occLabels}），请调整时段或更换场地后再重新提交`)
+    return
+  }
   if (confirm(`确定重新提交「${plan.team} - ${plan.venue}」的计划？`)) {
     const result = store.resubmitPlan(plan.id)
     if (!result) {
@@ -440,6 +463,11 @@ function confirmApproval() {
   border-left: 3px solid #6b7280;
 }
 
+.list-row.affected-by-occupation {
+  background: rgba(249, 115, 22, 0.04);
+  border-left: 3px solid #ea580c;
+}
+
 .col-date { width: 90px; }
 .col-venue { width: 100px; }
 .col-time { width: 110px; font-variant-numeric: tabular-nums; }
@@ -463,6 +491,24 @@ function confirmApproval() {
 .row-reject-reason {
   background: rgba(239, 68, 68, 0.08);
   color: #dc2626;
+}
+
+.row-occupation-conflict {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: rgba(249, 115, 22, 0.08);
+  color: #ea580c;
+}
+
+.row-occupation-conflict .occ-label {
+  font-weight: 600;
+}
+
+.row-occupation-conflict .occ-detail {
+  margin-right: 8px;
 }
 
 .row-approval-comment {
