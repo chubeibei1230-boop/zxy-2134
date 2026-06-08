@@ -47,8 +47,48 @@ export const OCCUPATION_TYPE_COLORS = {
   [OCCUPATION_TYPE.OTHER]: { bg: 'rgba(107,114,128,0.15)', color: '#6b7280' }
 }
 
+export const CHANGE_REQUEST_STATUS = {
+  PENDING_REVIEW: 'pending_review',
+  APPROVED: 'cr_approved',
+  REJECTED: 'cr_rejected',
+  CONFIRMED: 'confirmed'
+}
+
+export const CHANGE_REQUEST_STATUS_LABELS = {
+  [CHANGE_REQUEST_STATUS.PENDING_REVIEW]: '待审核',
+  [CHANGE_REQUEST_STATUS.APPROVED]: '已通过',
+  [CHANGE_REQUEST_STATUS.REJECTED]: '已驳回',
+  [CHANGE_REQUEST_STATUS.CONFIRMED]: '已完成'
+}
+
+export const CHANGE_REQUEST_STATUS_COLORS = {
+  [CHANGE_REQUEST_STATUS.PENDING_REVIEW]: { bg: 'rgba(245,158,11,0.15)', color: '#d97706' },
+  [CHANGE_REQUEST_STATUS.APPROVED]: { bg: 'rgba(34,197,94,0.15)', color: '#16a34a' },
+  [CHANGE_REQUEST_STATUS.REJECTED]: { bg: 'rgba(239,68,68,0.15)', color: '#dc2626' },
+  [CHANGE_REQUEST_STATUS.CONFIRMED]: { bg: 'rgba(99,102,241,0.15)', color: '#6366f1' }
+}
+
+export const CHANGE_TYPE = {
+  CHANGE_TIME: 'change_time',
+  CHANGE_VENUE: 'change_venue',
+  CANCEL: 'cancel'
+}
+
+export const CHANGE_TYPE_LABELS = {
+  [CHANGE_TYPE.CHANGE_TIME]: '改时段',
+  [CHANGE_TYPE.CHANGE_VENUE]: '改场地',
+  [CHANGE_TYPE.CANCEL]: '取消计划'
+}
+
+export const CHANGE_TYPE_COLORS = {
+  [CHANGE_TYPE.CHANGE_TIME]: { bg: 'rgba(245,158,11,0.15)', color: '#d97706' },
+  [CHANGE_TYPE.CHANGE_VENUE]: { bg: 'rgba(168,85,247,0.15)', color: '#9333ea' },
+  [CHANGE_TYPE.CANCEL]: { bg: 'rgba(239,68,68,0.15)', color: '#dc2626' }
+}
+
 let nextId = 1
 let nextOccupationId = 1
+let nextChangeRequestId = 1
 const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
 function generateId() {
@@ -57,6 +97,10 @@ function generateId() {
 
 function generateOccupationId() {
   return `occ_${nextOccupationId++}_${Date.now()}`
+}
+
+function generateChangeRequestId() {
+  return `cr_${nextChangeRequestId++}_${Date.now()}`
 }
 
 function makePlan(overrides) {
@@ -105,6 +149,34 @@ function makeOccupation(overrides) {
   }
 }
 
+function makeChangeRequest(overrides) {
+  return {
+    id: generateChangeRequestId(),
+    originalPlanId: '',
+    changeType: CHANGE_TYPE.CHANGE_TIME,
+    reason: '',
+    targetDate: today,
+    targetVenue: '',
+    targetStartTime: '',
+    targetEndTime: '',
+    status: CHANGE_REQUEST_STATUS.PENDING_REVIEW,
+    submittedAt: '',
+    reviewedAt: '',
+    reviewedBy: '',
+    reviewComment: '',
+    rejectReason: '',
+    confirmedAt: '',
+    confirmedBy: '',
+    createdBy: 'executor',
+    actionSessionId: '',
+    hasConflict: false,
+    conflictWith: [],
+    occupationConflicts: [],
+    affectedByOccupation: false,
+    ...overrides
+  }
+}
+
 const _seedPlans = [
   makePlan({ venue: '主训练场', startTime: '08:00', endTime: '10:00', team: '猎鹰突击队', headcount: 20, responsiblePerson: '张指挥', intensity: 'high', notes: '综合战术演练', status: PLAN_STATUS.PUBLISHED, createdBy: 'executor', submittedAt: '2026-06-07T09:00:00', approvedAt: '2026-06-07T10:30:00', publishedAt: '2026-06-07T14:00:00', actionSessionId: 'seed' }),
   makePlan({ venue: '主训练场', startTime: '10:30', endTime: '12:00', team: '雷霆特战队', headcount: 15, responsiblePerson: '李教官', intensity: 'medium', notes: '射击训练', status: PLAN_STATUS.APPROVED, createdBy: 'executor', submittedAt: '2026-06-07T11:00:00', approvedAt: '2026-06-07T15:00:00', actionSessionId: 'seed' }),
@@ -119,9 +191,15 @@ const _seedOccupations = [
   makeOccupation({ venue: '主训练场', startTime: '15:00', endTime: '17:00', type: OCCUPATION_TYPE.MAINTENANCE, reason: '草坪养护', notes: '草皮修复及灌溉系统维护', createdBy: 'organizer' })
 ]
 
+const _seedChangeRequests = [
+  makeChangeRequest({ originalPlanId: _seedPlans[0].id, changeType: CHANGE_TYPE.CHANGE_TIME, reason: '临时接到上级通知，需调整训练时段以配合装备检查', targetDate: today, targetVenue: '主训练场', targetStartTime: '14:00', targetEndTime: '16:00', status: CHANGE_REQUEST_STATUS.PENDING_REVIEW, submittedAt: new Date().toISOString(), createdBy: 'executor' }),
+  makeChangeRequest({ originalPlanId: _seedPlans[1].id, changeType: CHANGE_TYPE.CHANGE_VENUE, reason: '主训练场临时安排了重要外宾参观活动，需更换场地', targetDate: today, targetVenue: '副训练场', targetStartTime: '10:30', targetEndTime: '12:00', status: CHANGE_REQUEST_STATUS.APPROVED, submittedAt: '2026-06-07T16:00:00', reviewedAt: '2026-06-07T17:00:00', reviewedBy: 'supervisor', reviewComment: '同意更换，请组织者确认新场地可用', createdBy: 'executor' })
+]
+
 const state = reactive({
   plans: _seedPlans,
   occupations: _seedOccupations,
+  changeRequests: _seedChangeRequests,
   venues: ['主训练场', '副训练场', '体能训练馆', '战术模拟室'],
   teams: ['猎鹰突击队', '雷霆特战队', '钢铁卫士队', '利刃先锋队'],
   currentRole: 'organizer',
@@ -129,12 +207,18 @@ const state = reactive({
   middayBreak: { start: '12:00', end: '13:30' },
   editingPlanId: null,
   showForm: false,
+  showChangeRequestForm: false,
+  changeRequestTargetPlanId: null,
   filters: {
     venue: '',
     team: '',
     intensity: '',
     conflictOnly: false,
     status: ''
+  },
+  changeRequestFilters: {
+    status: '',
+    changeType: ''
   }
 })
 
@@ -615,15 +699,208 @@ function removeTeam(name) {
   state.teams = state.teams.filter(t => t !== name)
 }
 
+function getOriginalPlan(changeRequest) {
+  if (!changeRequest || !changeRequest.originalPlanId) return null
+  return state.plans.find(p => p.id === changeRequest.originalPlanId) || null
+}
+
+function checkConflictsForChangeRequest(cr) {
+  if (cr.changeType === CHANGE_TYPE.CANCEL) return { plans: [], occupations: [] }
+  const targetData = {
+    venue: cr.targetVenue,
+    date: cr.targetDate,
+    startTime: cr.targetStartTime,
+    endTime: cr.targetEndTime
+  }
+  const planConflicts = checkConflictsForPreview(targetData, cr.originalPlanId)
+  const occConflicts = checkOccupationConflictsForPreview(targetData)
+  return { plans: planConflicts, occupations: occConflicts }
+}
+
+function recalculateChangeRequestConflicts(cr) {
+  const { plans, occupations } = checkConflictsForChangeRequest(cr)
+  cr.hasConflict = plans.length > 0 || occupations.length > 0
+  cr.conflictWith = plans.map(p => p.id)
+  cr.occupationConflicts = occupations.map(o => o.id)
+  cr.affectedByOccupation = occupations.length > 0
+}
+
+function startChangeRequest(plan) {
+  if (plan.status !== PLAN_STATUS.APPROVED && plan.status !== PLAN_STATUS.PUBLISHED) return
+  if (state.currentRole !== 'executor') return
+  const existingPending = state.changeRequests.find(
+    cr => cr.originalPlanId === plan.id && cr.status === CHANGE_REQUEST_STATUS.PENDING_REVIEW
+  )
+  if (existingPending) {
+    alert('该计划已有一条待审核的变更申请，请等待审核后再提交新申请')
+    return
+  }
+  state.changeRequestTargetPlanId = plan.id
+  state.showChangeRequestForm = true
+}
+
+function closeChangeRequestForm() {
+  state.changeRequestTargetPlanId = null
+  state.showChangeRequestForm = false
+}
+
+function addChangeRequest(crData) {
+  const plan = state.plans.find(p => p.id === crData.originalPlanId)
+  if (!plan) return null
+  if (plan.status !== PLAN_STATUS.APPROVED && plan.status !== PLAN_STATUS.PUBLISHED) return null
+
+  const cr = makeChangeRequest({
+    originalPlanId: crData.originalPlanId,
+    changeType: crData.changeType,
+    reason: crData.reason,
+    targetDate: crData.targetDate || plan.date,
+    targetVenue: crData.targetVenue || plan.venue,
+    targetStartTime: crData.targetStartTime || plan.startTime,
+    targetEndTime: crData.targetEndTime || plan.endTime,
+    status: CHANGE_REQUEST_STATUS.PENDING_REVIEW,
+    submittedAt: new Date().toISOString(),
+    createdBy: state.currentRole,
+    actionSessionId: sessionId
+  })
+
+  recalculateChangeRequestConflicts(cr)
+  state.changeRequests.push(cr)
+  return cr
+}
+
+function approveChangeRequest(id, comment) {
+  const cr = state.changeRequests.find(c => c.id === id)
+  if (!cr) return false
+  if (cr.status !== CHANGE_REQUEST_STATUS.PENDING_REVIEW) return false
+  if (state.currentRole !== 'supervisor') return false
+  cr.status = CHANGE_REQUEST_STATUS.APPROVED
+  cr.reviewedAt = new Date().toISOString()
+  cr.reviewedBy = 'supervisor'
+  cr.reviewComment = comment || ''
+  cr.rejectReason = ''
+  return true
+}
+
+function rejectChangeRequest(id, reason) {
+  const cr = state.changeRequests.find(c => c.id === id)
+  if (!cr) return false
+  if (cr.status !== CHANGE_REQUEST_STATUS.PENDING_REVIEW) return false
+  if (state.currentRole !== 'supervisor') return false
+  cr.status = CHANGE_REQUEST_STATUS.REJECTED
+  cr.reviewedAt = new Date().toISOString()
+  cr.reviewedBy = 'supervisor'
+  cr.rejectReason = reason || ''
+  cr.reviewComment = ''
+  return true
+}
+
+function confirmChangeRequest(id) {
+  const cr = state.changeRequests.find(c => c.id === id)
+  if (!cr) return false
+  if (cr.status !== CHANGE_REQUEST_STATUS.APPROVED) return false
+  if (state.currentRole !== 'organizer') return false
+
+  const plan = state.plans.find(p => p.id === cr.originalPlanId)
+  if (!plan) return false
+
+  if (cr.changeType === CHANGE_TYPE.CANCEL) {
+    plan.status = PLAN_STATUS.REJECTED
+    plan.rejectReason = `计划变更申请（取消）：${cr.reason}`
+    plan.actionSessionId = sessionId
+  } else {
+    plan.date = cr.targetDate
+    plan.venue = cr.targetVenue
+    plan.startTime = cr.targetStartTime
+    plan.endTime = cr.targetEndTime
+    recalculateAllConflicts()
+  }
+
+  cr.status = CHANGE_REQUEST_STATUS.CONFIRMED
+  cr.confirmedAt = new Date().toISOString()
+  cr.confirmedBy = 'organizer'
+  return true
+}
+
+function resubmitChangeRequest(id) {
+  const cr = state.changeRequests.find(c => c.id === id)
+  if (!cr) return false
+  if (cr.status !== CHANGE_REQUEST_STATUS.REJECTED) return false
+  if (state.currentRole !== 'executor') return false
+  if (cr.changeType !== CHANGE_TYPE.CANCEL) {
+    const targetData = {
+      venue: cr.targetVenue,
+      date: cr.targetDate,
+      startTime: cr.targetStartTime,
+      endTime: cr.targetEndTime
+    }
+    const occConflicts = checkOccupationConflictsForPreview(targetData)
+    if (occConflicts.length > 0) return false
+  }
+  cr.status = CHANGE_REQUEST_STATUS.PENDING_REVIEW
+  cr.submittedAt = new Date().toISOString()
+  cr.reviewedAt = ''
+  cr.reviewedBy = ''
+  cr.reviewComment = ''
+  cr.rejectReason = ''
+  cr.actionSessionId = sessionId
+  recalculateChangeRequestConflicts(cr)
+  return true
+}
+
+function getChangeRequestsForPlan(planId) {
+  return state.changeRequests.filter(cr => cr.originalPlanId === planId)
+}
+
+function getActiveChangeRequestForPlan(planId) {
+  return state.changeRequests.find(
+    cr => cr.originalPlanId === planId &&
+      (cr.status === CHANGE_REQUEST_STATUS.PENDING_REVIEW || cr.status === CHANGE_REQUEST_STATUS.APPROVED)
+  ) || null
+}
+
+function getVisibleChangeRequests() {
+  const role = state.currentRole
+  return state.changeRequests.filter(cr => {
+    if (role === 'executor') return cr.createdBy === 'executor'
+    if (role === 'supervisor') {
+      return cr.status !== CHANGE_REQUEST_STATUS.CONFIRMED || cr.createdBy === 'executor'
+    }
+    if (role === 'organizer') return true
+    return false
+  })
+}
+
+const filteredChangeRequests = computed(() => {
+  return getVisibleChangeRequests().filter(cr => {
+    if (state.changeRequestFilters.status && cr.status !== state.changeRequestFilters.status) return false
+    if (state.changeRequestFilters.changeType && cr.changeType !== state.changeRequestFilters.changeType) return false
+    return true
+  })
+})
+
+const pendingReviewChangeRequests = computed(() => {
+  return state.changeRequests.filter(cr => cr.status === CHANGE_REQUEST_STATUS.PENDING_REVIEW)
+})
+
+const approvedChangeRequests = computed(() => {
+  return state.changeRequests.filter(cr => cr.status === CHANGE_REQUEST_STATUS.APPROVED)
+})
+
+const changeRequestTargetPlan = computed(() => {
+  if (!state.changeRequestTargetPlanId) return null
+  return state.plans.find(p => p.id === state.changeRequestTargetPlanId) || null
+})
+
 function exportData() {
   const data = {
-    version: 3,
+    version: 4,
     exportDate: new Date().toISOString(),
     venues: [...state.venues],
     teams: [...state.teams],
     middayBreak: { ...state.middayBreak },
     plans: state.plans.map(p => ({ ...p })),
-    occupations: state.occupations.map(o => ({ ...o }))
+    occupations: state.occupations.map(o => ({ ...o })),
+    changeRequests: state.changeRequests.map(cr => ({ ...cr }))
   }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -677,6 +954,19 @@ function importData(jsonString) {
         }, 0)
         nextOccupationId = maxOccNum + 1
       }
+      if (data.changeRequests) {
+        state.changeRequests = data.changeRequests.map(cr => ({
+          ...makeChangeRequest(),
+          ...cr
+        }))
+        const maxCrNum = state.changeRequests.reduce((max, cr) => {
+          const num = parseInt(cr.id.split('_')[1]) || 0
+          return num > max ? num : max
+        }, 0)
+        nextChangeRequestId = maxCrNum + 1
+      } else {
+        state.changeRequests = []
+      }
       recalculateAllConflicts()
       return true
     }
@@ -705,6 +995,7 @@ export const store = {
   publishPlan,
   checkConflictsForPreview,
   checkOccupationConflictsForPreview,
+  checkConflictsForChangeRequest,
   recalculateAllConflicts,
   getTransitionError,
   addOccupation,
@@ -730,5 +1021,20 @@ export const store = {
   importData,
   spansMiddayBreak,
   timeToMinutes,
-  minutesToTime
+  minutesToTime,
+  startChangeRequest,
+  closeChangeRequestForm,
+  addChangeRequest,
+  approveChangeRequest,
+  rejectChangeRequest,
+  confirmChangeRequest,
+  resubmitChangeRequest,
+  getChangeRequestsForPlan,
+  getActiveChangeRequestForPlan,
+  getOriginalPlan,
+  getVisibleChangeRequests,
+  filteredChangeRequests,
+  pendingReviewChangeRequests,
+  approvedChangeRequests,
+  changeRequestTargetPlan
 }

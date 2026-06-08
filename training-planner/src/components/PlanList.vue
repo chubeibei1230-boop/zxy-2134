@@ -120,6 +120,9 @@
             <button class="action-btn end-early" @click="handleEndEarly(plan)" title="提前结束">⏹</button>
             <button class="action-btn extend" @click="handleExtend(plan)" title="临时延长">⏩</button>
           </template>
+          <template v-if="isExecutor && (plan.status === PLAN_STATUS.APPROVED || plan.status === PLAN_STATUS.PUBLISHED)">
+            <button class="action-btn change" @click="handleStartChangeRequest(plan)" title="发起变更申请">📝</button>
+          </template>
           <button
             v-if="plan.status === PLAN_STATUS.REJECTED"
             class="action-btn info"
@@ -138,6 +141,17 @@
           <span class="occ-detail" v-for="occId in plan.occupationConflicts" :key="occId">
             {{ getOccupationLabel(occId) }}
           </span>
+        </div>
+        <div class="row-change-request" v-if="getActiveChangeRequest(plan)">
+          <span class="cr-label">📝 变更申请中：</span>
+          <span
+            class="cr-type-badge"
+            :style="{ background: CHANGE_TYPE_COLORS[getActiveChangeRequest(plan).changeType].bg, color: CHANGE_TYPE_COLORS[getActiveChangeRequest(plan).changeType].color }"
+          >{{ CHANGE_TYPE_LABELS[getActiveChangeRequest(plan).changeType] }}</span>
+          <span
+            class="cr-status-badge"
+            :style="{ background: CHANGE_REQUEST_STATUS_COLORS[getActiveChangeRequest(plan).status].bg, color: CHANGE_REQUEST_STATUS_COLORS[getActiveChangeRequest(plan).status].color }"
+          >{{ CHANGE_REQUEST_STATUS_LABELS[getActiveChangeRequest(plan).status] }}</span>
         </div>
       </div>
     </div>
@@ -201,7 +215,7 @@
 
 <script setup>
 import { ref, computed, reactive } from 'vue'
-import { store, timeToMinutes, minutesToTime, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS, OCCUPATION_TYPE_LABELS, OCCUPATION_TYPE_COLORS } from '../store.js'
+import { store, timeToMinutes, minutesToTime, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS, OCCUPATION_TYPE_LABELS, OCCUPATION_TYPE_COLORS, CHANGE_REQUEST_STATUS, CHANGE_REQUEST_STATUS_LABELS, CHANGE_REQUEST_STATUS_COLORS, CHANGE_TYPE_LABELS, CHANGE_TYPE_COLORS } from '../store.js'
 
 const isExecutor = computed(() => store.state.currentRole === 'executor')
 const isSupervisor = computed(() => store.state.currentRole === 'supervisor')
@@ -314,6 +328,14 @@ function handlePublish(plan) {
 
 function showRejectReason(plan) {
   alert(`驳回原因：${plan.rejectReason || '未填写'}`)
+}
+
+function handleStartChangeRequest(plan) {
+  store.startChangeRequest(plan)
+}
+
+function getActiveChangeRequest(plan) {
+  return store.getActiveChangeRequestForPlan(plan.id)
 }
 
 const approvalDialog = reactive({
@@ -602,6 +624,40 @@ function confirmApproval() {
 .action-btn.publish:hover {
   border-color: #6366f1;
   background: rgba(99, 102, 241, 0.1);
+}
+
+.action-btn.change {
+  border-color: #9333ea;
+  color: #9333ea;
+}
+
+.action-btn.change:hover {
+  background: rgba(168, 85, 247, 0.15);
+}
+
+.row-change-request {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: rgba(168, 85, 247, 0.08);
+  color: #9333ea;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.row-change-request .cr-label {
+  font-weight: 600;
+}
+
+.cr-type-badge,
+.cr-status-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .action-btn.delete:hover {

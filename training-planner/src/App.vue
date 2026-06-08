@@ -33,6 +33,14 @@
           <span class="badge-icon">📋</span>
           <span class="badge-text">{{ approvedCount }} 条待发布</span>
         </div>
+        <div class="change-badge" v-if="pendingReviewCRCount > 0 && isSupervisor" @click="activeTab = 'changeRequest'; store.state.changeRequestFilters.status = CHANGE_REQUEST_STATUS.PENDING_REVIEW">
+          <span class="badge-icon">📝</span>
+          <span class="badge-text">{{ pendingReviewCRCount }} 条变更待审</span>
+        </div>
+        <div class="change-badge confirmed" v-if="approvedCRCount > 0 && isOrganizer" @click="activeTab = 'changeRequest'; store.state.changeRequestFilters.status = CHANGE_REQUEST_STATUS.APPROVED">
+          <span class="badge-icon">✅</span>
+          <span class="badge-text">{{ approvedCRCount }} 条变更待确认</span>
+        </div>
         <button class="header-btn" @click="store.exportData()" title="导出计划">
           📤 导出
         </button>
@@ -172,6 +180,45 @@
           <div class="todo-empty" v-else>暂无待发布事项</div>
         </div>
 
+        <div class="sidebar-section" v-if="isExecutor">
+          <div class="section-header">
+            <h3>我的变更申请</h3>
+          </div>
+          <div class="todo-list" v-if="executorCRItems.length > 0">
+            <div class="todo-item" v-for="cr in executorCRItems" :key="cr.id" @click="activeTab = 'changeRequest'">
+              <span class="todo-badge" :class="crBadgeClass(cr)">{{ crBadgeLabel(cr) }}</span>
+              <span class="todo-text">{{ getCRLabel(cr) }}</span>
+            </div>
+          </div>
+          <div class="todo-empty" v-else>暂无变更申请</div>
+        </div>
+
+        <div class="sidebar-section" v-if="isSupervisor">
+          <div class="section-header">
+            <h3>变更审核</h3>
+          </div>
+          <div class="todo-list" v-if="supervisorCRItems.length > 0">
+            <div class="todo-item" v-for="cr in supervisorCRItems" :key="cr.id" @click="activeTab = 'changeRequest'">
+              <span class="todo-badge" :class="crBadgeClass(cr)">{{ crBadgeLabel(cr) }}</span>
+              <span class="todo-text">{{ getCRLabel(cr) }}</span>
+            </div>
+          </div>
+          <div class="todo-empty" v-else>暂无变更审核事项</div>
+        </div>
+
+        <div class="sidebar-section" v-if="isOrganizer">
+          <div class="section-header">
+            <h3>变更确认</h3>
+          </div>
+          <div class="todo-list" v-if="organizerCRItems.length > 0">
+            <div class="todo-item" v-for="cr in organizerCRItems" :key="cr.id" @click="activeTab = 'changeRequest'">
+              <span class="todo-badge cr-approved">已通过</span>
+              <span class="todo-text">{{ getCRLabel(cr) }}</span>
+            </div>
+          </div>
+          <div class="todo-empty" v-else>暂无变更确认事项</div>
+        </div>
+
         <OccupationPanel @addOccupation="showOccupationForm = true" />
 
         <ConflictPanel />
@@ -195,29 +242,38 @@
             @click="activeTab = 'occupation'"
             v-if="isOrganizer"
           >🔧 场地占用</button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'changeRequest' }"
+            @click="activeTab = 'changeRequest'"
+          >📝 计划变更</button>
         </div>
         <div class="tab-content">
           <PlanList v-if="activeTab === 'list'" />
           <TimelinePreview v-if="activeTab === 'timeline'" />
           <OccupationPanel v-if="activeTab === 'occupation' && isOrganizer" :embedded="true" @addOccupation="showOccupationForm = true" />
+          <ChangeRequestList v-if="activeTab === 'changeRequest'" />
         </div>
       </main>
     </div>
 
     <PlanForm />
     <OccupationForm :visible="showOccupationForm" @close="showOccupationForm = false" @confirmed="showOccupationForm = false" />
+    <ChangeRequestForm />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, nextTick } from 'vue'
-import { store, PLAN_STATUS } from './store.js'
+import { store, PLAN_STATUS, CHANGE_REQUEST_STATUS, CHANGE_TYPE_LABELS } from './store.js'
 import PlanForm from './components/PlanForm.vue'
 import PlanList from './components/PlanList.vue'
 import TimelinePreview from './components/TimelinePreview.vue'
 import ConflictPanel from './components/ConflictPanel.vue'
 import OccupationPanel from './components/OccupationPanel.vue'
 import OccupationForm from './components/OccupationForm.vue'
+import ChangeRequestList from './components/ChangeRequestList.vue'
+import ChangeRequestForm from './components/ChangeRequestForm.vue'
 
 const roles = [
   { key: 'organizer', label: '组织者', icon: '🏗' },
@@ -226,9 +282,9 @@ const roles = [
 ]
 
 const roleDescriptions = {
-  organizer: '组织者：可查看已通过/已发布计划并统筹发布，不可查看草稿和待审批',
-  executor: '执行人：可创建/编辑/提交训练计划，处理被驳回的修改',
-  supervisor: '监督人：可审批或驳回待审批计划，不可查看草稿'
+  organizer: '组织者：可查看已通过/已发布计划并统筹发布，确认变更申请生效',
+  executor: '执行人：可创建/编辑/提交训练计划，对已通过/已发布计划发起变更申请',
+  supervisor: '监督人：可审批或驳回待审批计划和变更申请，不可查看草稿'
 }
 
 const roleHint = ref('')
@@ -256,6 +312,8 @@ const teamInput = ref(null)
 
 const pendingCount = computed(() => store.pendingApprovalPlans.value.length)
 const approvedCount = computed(() => store.state.plans.filter(p => p.status === PLAN_STATUS.APPROVED).length)
+const pendingReviewCRCount = computed(() => store.pendingReviewChangeRequests.value.length)
+const approvedCRCount = computed(() => store.approvedChangeRequests.value.length)
 
 const executorTodoItems = computed(() =>
   store.state.plans.filter(p => p.status === PLAN_STATUS.REJECTED)
@@ -268,6 +326,45 @@ const supervisorTodoItems = computed(() =>
 const organizerTodoItems = computed(() =>
   store.state.plans.filter(p => p.status === PLAN_STATUS.APPROVED)
 )
+
+const executorCRItems = computed(() =>
+  store.state.changeRequests.filter(cr =>
+    cr.createdBy === 'executor' &&
+    (cr.status === CHANGE_REQUEST_STATUS.PENDING_REVIEW || cr.status === CHANGE_REQUEST_STATUS.REJECTED || cr.status === CHANGE_REQUEST_STATUS.APPROVED)
+  )
+)
+
+const supervisorCRItems = computed(() =>
+  store.state.changeRequests.filter(cr =>
+    cr.status === CHANGE_REQUEST_STATUS.PENDING_REVIEW || cr.status === CHANGE_REQUEST_STATUS.REJECTED
+  )
+)
+
+const organizerCRItems = computed(() =>
+  store.state.changeRequests.filter(cr =>
+    cr.status === CHANGE_REQUEST_STATUS.APPROVED
+  )
+)
+
+function crBadgeClass(cr) {
+  if (cr.status === CHANGE_REQUEST_STATUS.PENDING_REVIEW) return 'pending'
+  if (cr.status === CHANGE_REQUEST_STATUS.APPROVED) return 'cr-approved'
+  if (cr.status === CHANGE_REQUEST_STATUS.REJECTED) return 'rejected'
+  return 'confirmed'
+}
+
+function crBadgeLabel(cr) {
+  if (cr.status === CHANGE_REQUEST_STATUS.PENDING_REVIEW) return '待审核'
+  if (cr.status === CHANGE_REQUEST_STATUS.APPROVED) return '已通过'
+  if (cr.status === CHANGE_REQUEST_STATUS.REJECTED) return '已驳回'
+  return '已完成'
+}
+
+function getCRLabel(cr) {
+  const plan = store.getOriginalPlan(cr)
+  if (!plan) return CHANGE_TYPE_LABELS[cr.changeType]
+  return `${plan.team} · ${CHANGE_TYPE_LABELS[cr.changeType]}`
+}
 
 function setStatusFilter(status) {
   store.state.filters.status = status
@@ -520,6 +617,35 @@ body {
 
 .publish-badge:hover {
   background: rgba(99, 102, 241, 0.25);
+}
+
+.change-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  background: rgba(168, 85, 247, 0.15);
+  color: #9333ea;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.change-badge:hover {
+  background: rgba(168, 85, 247, 0.25);
+}
+
+.change-badge.confirmed {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.change-badge.confirmed:hover {
+  background: rgba(34, 197, 94, 0.25);
 }
 
 .badge-icon {
@@ -789,6 +915,11 @@ body {
 .todo-badge.approved {
   background: rgba(34, 197, 94, 0.15);
   color: #16a34a;
+}
+
+.todo-badge.cr-approved {
+  background: rgba(168, 85, 247, 0.15);
+  color: #9333ea;
 }
 
 .todo-text {

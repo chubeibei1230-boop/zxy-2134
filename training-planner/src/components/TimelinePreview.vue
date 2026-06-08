@@ -64,7 +64,8 @@
                       'status-pending': plan.status === PLAN_STATUS.PENDING_APPROVAL,
                       'status-approved': plan.status === PLAN_STATUS.APPROVED,
                       'status-rejected': plan.status === PLAN_STATUS.REJECTED,
-                      'status-published': plan.status === PLAN_STATUS.PUBLISHED
+                      'status-published': plan.status === PLAN_STATUS.PUBLISHED,
+                      'has-change-request': !!getActiveChangeRequest(plan.id)
                     }
                   ]"
                   :title="slotPlanTooltip(plan)"
@@ -72,6 +73,7 @@
                 >
                   <span class="slot-plan-name">{{ plan.team }}</span>
                   <span class="slot-plan-status-dot" :style="{ background: STATUS_COLORS[plan.status].color }"></span>
+                  <span class="slot-cr-dot" v-if="getActiveChangeRequest(plan.id)" title="有变更申请">📝</span>
                 </div>
               </template>
             </td>
@@ -88,6 +90,8 @@
       <span class="legend-item"><span class="legend-color occupation"></span>场地占用</span>
       <span class="legend-item"><span class="legend-color break"></span>午休</span>
       <span class="legend-separator">|</span>
+      <span class="legend-item"><span class="legend-color change"></span>变更申请中</span>
+      <span class="legend-separator">|</span>
       <span class="legend-item"><span class="legend-dot" style="background:#6b7280"></span>草稿</span>
       <span class="legend-item"><span class="legend-dot" style="background:#d97706"></span>待审批</span>
       <span class="legend-item"><span class="legend-dot" style="background:#16a34a"></span>已通过</span>
@@ -99,7 +103,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { store, timeToMinutes, minutesToTime, getEffectiveSegments, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS, OCCUPATION_TYPE_LABELS, OCCUPATION_TYPE_COLORS } from '../store.js'
+import { store, timeToMinutes, minutesToTime, getEffectiveSegments, PLAN_STATUS, STATUS_LABELS, STATUS_COLORS, OCCUPATION_TYPE_LABELS, OCCUPATION_TYPE_COLORS, CHANGE_REQUEST_STATUS, CHANGE_TYPE_LABELS, CHANGE_TYPE_COLORS, CHANGE_REQUEST_STATUS_LABELS, CHANGE_REQUEST_STATUS_COLORS } from '../store.js'
 
 const timeStart = ref(6 * 60)
 const timeEnd = ref(21 * 60)
@@ -166,7 +170,15 @@ function slotPlanTooltip(plan) {
   if (plan.status === PLAN_STATUS.REJECTED && plan.rejectReason) {
     tip += ` | 驳回原因：${plan.rejectReason}`
   }
+  const activeCR = getActiveChangeRequest(plan.id)
+  if (activeCR) {
+    tip += ` | 📝 变更申请：${CHANGE_TYPE_LABELS[activeCR.changeType]}(${CHANGE_REQUEST_STATUS_LABELS[activeCR.status]})`
+  }
   return tip
+}
+
+function getActiveChangeRequest(planId) {
+  return store.getActiveChangeRequestForPlan(planId)
 }
 
 function slotOccupationTooltip(occ) {
@@ -399,6 +411,16 @@ function handlePlanClick(plan) {
 .slot-plan.status-rejected { border-left: 2px solid #dc2626; opacity: 0.6; }
 .slot-plan.status-published { border-left: 2px solid #6366f1; }
 
+.slot-plan.has-change-request {
+  outline: 2px dashed #9333ea;
+  outline-offset: -1px;
+}
+
+.slot-cr-dot {
+  font-size: 8px;
+  line-height: 1;
+}
+
 @keyframes pulse-conflict {
   0%, 100% { outline-color: #ef4444; }
   50% { outline-color: rgba(239, 68, 68, 0.4); }
@@ -439,6 +461,8 @@ function handlePlanClick(plan) {
 .legend-color.conflict { background: rgba(239, 68, 68, 0.1); outline: 2px solid #ef4444; }
 .legend-color.occupation { background: rgba(249, 115, 22, 0.15); outline: 1px dashed #ea580c; }
 .legend-color.break { background: rgba(245, 158, 11, 0.15); }
+
+.legend-color.change { background: rgba(168, 85, 247, 0.1); outline: 2px dashed #9333ea; }
 
 .legend-dot {
   width: 8px;
